@@ -181,6 +181,10 @@ struct MIDIMapView: View {
             // Learn Mode Toggle
             Button {
                 session.midiMapManager.toggleLearnMode()
+                if session.midiMapManager.isInLearnMode {
+                    // Close the MIDI map view - user can now click directly on plugin UI
+                    dismiss()
+                }
             } label: {
                 HStack {
                     Circle()
@@ -195,11 +199,11 @@ struct MIDIMapView: View {
             
             if session.midiMapManager.isInLearnMode {
                 if let pendingCC = session.midiMapManager.pendingCCForLearnMode {
-                    Text("Move CC \(pendingCC) → Interact with a parameter")
+                    Text("CC \(pendingCC) → Click a parameter in the plugin UI")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 } else {
-                    Text("Move a MIDI controller, then interact with a parameter")
+                    Text("Move a MIDI controller, then click a parameter in the plugin UI")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }

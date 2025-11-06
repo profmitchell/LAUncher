@@ -60,6 +60,10 @@ final class PluginHostSession: ObservableObject {
     let midiMapManager = MIDIMapManager()
     private var cancellables: Set<AnyCancellable> = []
     private var mcpServer: MCPServerManager?
+    private var parameterChangeMonitor: Task<Void, Never>?
+    private var lastParameterValues: [String: AUValue] = [:]
+    private var isMonitoringParameterChanges = false
+    private var isSettingParameterProgrammatically = false
 
     init() {
         observeEngine()
@@ -263,6 +267,9 @@ final class PluginHostSession: ObservableObject {
             Task {
                 await analyzeParameters()
             }
+            
+            // Start parameter change monitoring for learn mode
+            startParameterChangeMonitoring()
         } catch {
             engineManager.unloadPlugin()
             currentComponent = nil
@@ -299,6 +306,10 @@ final class PluginHostSession: ObservableObject {
         currentComponent = nil
         pluginViewController = nil
         analyzedParameters = nil
+        parameterChangeMonitor?.cancel()
+        parameterChangeMonitor = nil
+        isMonitoringParameterChanges = false
+        lastParameterValues.removeAll()
         engineState = .stopped
     }
 
@@ -379,6 +390,9 @@ final class PluginHostSession: ObservableObject {
                 
                 // Apply existing mappings - support multiple parameters per CC
                 let mappingsForCC = midiMapManager.mappings.filter { $0.ccNumber == ccNumber }
+                isSettingParameterProgrammatically = true
+                defer { isSettingParameterProgrammatically = false }
+                
                 for mapping in mappingsForCC {
                     if let param = self.findParameter(identifier: mapping.parameterId) {
                         // Convert MIDI CC (0-127) to parameter value
@@ -691,12 +705,16 @@ final class PluginHostSession: ObservableObject {
         let clampedValue = max(param.minValue, min(param.maxValue, AUValue(value)))
         let oldValue = param.value
         
+        // Mark that we're setting programmatically (not user interaction)
+        isSettingParameterProgrammatically = true
+        defer { isSettingParameterProgrammatically = false }
+        
         param.setValue(clampedValue, originator: nil)
         
         print("🎛️ Set \(param.displayName): \(oldValue) -> \(clampedValue)")
         
-        // Track parameter interaction for learn mode
-        midiMapManager.handleParameterInteraction(parameterId: param.identifier, parameterDisplayName: param.displayName, minValue: param.minValue, maxValue: param.maxValue)
+        // Track parameter interaction for learn mode (only if from user interaction, not programmatic)
+        // User interactions will trigger through parameter change monitoring
         
         // Force UI update on main thread
         DispatchQueue.main.async {
@@ -794,6 +812,9 @@ final class PluginHostSession: ObservableObject {
         
         // Apply all changes - batch update for better performance
         // Use a small delay between changes to allow UI to update
+        isSettingParameterProgrammatically = true
+        defer { isSettingParameterProgrammatically = false }
+        
         for (index, (param, clampedValue)) in changes.enumerated() {
             let oldValue = param.value
             
@@ -1011,5 +1032,52 @@ final class PluginHostSession: ObservableObject {
             return Int(nsString.substring(with: match.range)) ?? 1
         }
         return 1
+    }
+    
+    func startParameterChangeMonitoring() {
+        guard !isMonitoringParameterChanges else { return }
+        isMonitoringParameterChanges = true
+        
+        // Initialize parameter values
+        if let params = getCurrentParameters() {
+            lastParameterValues = Dictionary(uniqueKeysWithValues: params.map { ($0.identifier, $0.value) })
+        }
+        
+        parameterChangeMonitor = Task { @MainActor [weak self] in
+            guard let self else { return }
+            
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 50_000_000) // 50ms polling
+                
+                // Only monitor when learn mode is active
+                guard self.midiMapManager.isInLearnMode,
+                      self.midiMapManager.pendingCCForLearnMode != nil,
+                      !self.isSettingParameterProgrammatically, // Don't trigger on programmatic changes
+                      let params = self.getCurrentParameters() else {
+                    continue
+                }
+                
+                // Check for parameter value changes (indicating user interaction)
+                for param in params {
+                    if let oldValue = self.lastParameterValues[param.identifier],
+                       abs(param.value - oldValue) > 0.001 { // Significant change
+                        // Parameter was changed by user interaction!
+                        print("🎯 Learn Mode: Detected parameter change: \(param.displayName)")
+                        self.midiMapManager.handleParameterInteraction(
+                            parameterId: param.identifier,
+                            parameterDisplayName: param.displayName,
+                            minValue: param.minValue,
+                            maxValue: param.maxValue
+                        )
+                        // Update stored value
+                        self.lastParameterValues[param.identifier] = param.value
+                        break // Only handle one parameter change at a time
+                    }
+                }
+                
+                // Update stored values
+                self.lastParameterValues = Dictionary(uniqueKeysWithValues: params.map { ($0.identifier, $0.value) })
+            }
+        }
     }
 }

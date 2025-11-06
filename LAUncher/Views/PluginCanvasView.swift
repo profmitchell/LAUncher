@@ -12,11 +12,21 @@ struct PluginCanvasView: View {
                 .animation(.easeInOut(duration: 0.2), value: session.pluginViewController == nil)
 
             if let controller = session.pluginViewController {
-                PluginEditorContainer(viewController: controller)
+                PluginEditorContainer(viewController: controller, session: session)
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .padding(12)
                     .background(controllerBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay(
+                        // Visual indicator when learn mode is active
+                        Group {
+                            if session.midiMapManager.isInLearnMode {
+                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                    .stroke(Color.green.opacity(0.6), lineWidth: 3)
+                                    .padding(12)
+                            }
+                        }
+                    )
             } else {
                 VStack(spacing: 12) {
                     Image(systemName: "square.stack.3d.up")
@@ -70,9 +80,10 @@ private struct PluginEditorContainer: NSViewControllerRepresentable {
     typealias NSViewControllerType = NSViewController
 
     var viewController: NSViewController
+    var session: PluginHostSession
 
     func makeNSViewController(context: Context) -> NSViewController {
-        viewController
+        return viewController
     }
 
     func updateNSViewController(_ nsViewController: NSViewController, context: Context) {
