@@ -10,14 +10,8 @@ struct RootHostView: View {
     
     var body: some View {
         NavigationSplitView {
-            // Sidebar (Inspector)
-            if session.isShowingInspector {
-                InspectorPanelView(session: session)
-                    .frame(minWidth: 280, idealWidth: 320, maxWidth: 400)
-            } else {
-                Color.clear
-                    .frame(width: 0)
-            }
+            // Left Sidebar
+            LeftSidebarView(session: session)
         } detail: {
             ZStack(alignment: .bottom) {
                 VStack(spacing: 0) {
@@ -49,9 +43,23 @@ struct RootHostView: View {
                 // Enable trackpad rotation gestures in the window (no-op handler)
                 RotationGestureCatcherView()
                     .frame(width: 0, height: 0)
+                
+                // Right-side inspector panel overlay
+                if session.isShowingInspector {
+                    VStack { Spacer() }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                        .overlay(
+                            InspectorPanelView(session: session)
+                                .padding(.top, 12)
+                                .padding(.trailing, 12),
+                            alignment: .topTrailing
+                        )
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
             }
         }
         .frame(minWidth: 960, minHeight: 600)
+        .animation(.easeInOut(duration: 0.2), value: session.themeManager.currentTheme.id)
         .sheet(isPresented: $session.isShowingPluginPicker) {
             PluginPickerView(session: session)
         }
@@ -63,6 +71,9 @@ struct RootHostView: View {
         }
         .sheet(isPresented: $session.isShowingMIDIMap) {
             MIDIMapView(session: session)
+        }
+        .sheet(isPresented: $session.isShowingHelp) {
+            HelpView(session: session)
         }
         .onChange(of: session.isShowingChat) {
             Task { @MainActor in

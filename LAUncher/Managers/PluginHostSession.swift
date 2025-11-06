@@ -38,6 +38,7 @@ final class PluginHostSession: ObservableObject {
     @Published var isShowingMIDIMap = false
     @Published var isShowingChat = false
     @Published var isShowingInspector = false
+    @Published var isShowingHelp = false
     @Published var exportedParameterJSON: String = ""
     
     // Parameter analysis cache

@@ -167,8 +167,110 @@ struct AppTheme: Identifiable, Codable {
         materialStyle: .ultraThin
     )
     
+    static let forest = AppTheme(
+        id: "forest",
+        name: "Forest",
+        isBuiltIn: true,
+        backgroundTop: ThemeColor(red: 0.08, green: 0.15, blue: 0.10, opacity: 1.0),
+        backgroundBottom: ThemeColor(red: 0.05, green: 0.10, blue: 0.06, opacity: 1.0),
+        containerBackground: ThemeColor(red: 0.12, green: 0.20, blue: 0.15, opacity: 0.4),
+        containerBorder: ThemeColor(red: 0.2, green: 0.35, blue: 0.25, opacity: 0.3),
+        primaryText: ThemeColor(red: 0.85, green: 0.95, blue: 0.88, opacity: 1.0),
+        secondaryText: ThemeColor(red: 0.6, green: 0.75, blue: 0.65, opacity: 1.0),
+        accentColor: ThemeColor(red: 0.2, green: 0.8, blue: 0.4, opacity: 1.0),
+        canvasBackground: ThemeColor(red: 0.06, green: 0.12, blue: 0.08, opacity: 0.6),
+        canvasBorder: ThemeColor(red: 0.2, green: 0.35, blue: 0.25, opacity: 0.3),
+        placeholderFill: ThemeColor(red: 0.12, green: 0.20, blue: 0.15, opacity: 0.3),
+        materialStyle: .ultraThin
+    )
+    
+    static let neon = AppTheme(
+        id: "neon",
+        name: "Neon",
+        isBuiltIn: true,
+        backgroundTop: ThemeColor(red: 0.05, green: 0.02, blue: 0.10, opacity: 1.0),
+        backgroundBottom: ThemeColor(red: 0.02, green: 0.01, blue: 0.05, opacity: 1.0),
+        containerBackground: ThemeColor(red: 0.15, green: 0.05, blue: 0.25, opacity: 0.5),
+        containerBorder: ThemeColor(red: 0.6, green: 0.2, blue: 1.0, opacity: 0.4),
+        primaryText: ThemeColor(red: 1.0, green: 0.3, blue: 1.0, opacity: 1.0),
+        secondaryText: ThemeColor(red: 0.7, green: 0.2, blue: 0.7, opacity: 1.0),
+        accentColor: ThemeColor(red: 0.8, green: 0.0, blue: 1.0, opacity: 1.0),
+        canvasBackground: ThemeColor(red: 0.08, green: 0.02, blue: 0.15, opacity: 0.7),
+        canvasBorder: ThemeColor(red: 0.6, green: 0.2, blue: 1.0, opacity: 0.4),
+        placeholderFill: ThemeColor(red: 0.15, green: 0.05, blue: 0.25, opacity: 0.4),
+        materialStyle: .ultraThin
+    )
+    
+    static let monochrome = AppTheme(
+        id: "monochrome",
+        name: "Monochrome",
+        isBuiltIn: true,
+        backgroundTop: ThemeColor(red: 0.15, green: 0.15, blue: 0.15, opacity: 1.0),
+        backgroundBottom: ThemeColor(red: 0.10, green: 0.10, blue: 0.10, opacity: 1.0),
+        containerBackground: ThemeColor(red: 0.2, green: 0.2, blue: 0.2, opacity: 0.5),
+        containerBorder: ThemeColor(red: 0.4, green: 0.4, blue: 0.4, opacity: 0.3),
+        primaryText: ThemeColor(red: 0.95, green: 0.95, blue: 0.95, opacity: 1.0),
+        secondaryText: ThemeColor(red: 0.6, green: 0.6, blue: 0.6, opacity: 1.0),
+        accentColor: ThemeColor(red: 0.8, green: 0.8, blue: 0.8, opacity: 1.0),
+        canvasBackground: ThemeColor(red: 0.12, green: 0.12, blue: 0.12, opacity: 0.6),
+        canvasBorder: ThemeColor(red: 0.4, green: 0.4, blue: 0.4, opacity: 0.3),
+        placeholderFill: ThemeColor(red: 0.2, green: 0.2, blue: 0.2, opacity: 0.3),
+        materialStyle: .ultraThin
+    )
+    
+    static let amethyst = AppTheme(
+        id: "amethyst",
+        name: "Amethyst",
+        isBuiltIn: true,
+        backgroundTop: ThemeColor(red: 0.18, green: 0.12, blue: 0.25, opacity: 1.0),
+        backgroundBottom: ThemeColor(red: 0.12, green: 0.08, blue: 0.18, opacity: 1.0),
+        containerBackground: ThemeColor(red: 0.25, green: 0.18, blue: 0.32, opacity: 0.4),
+        containerBorder: ThemeColor(red: 0.5, green: 0.35, blue: 0.65, opacity: 0.3),
+        primaryText: ThemeColor(red: 0.95, green: 0.85, blue: 1.0, opacity: 1.0),
+        secondaryText: ThemeColor(red: 0.7, green: 0.6, blue: 0.8, opacity: 1.0),
+        accentColor: ThemeColor(red: 0.7, green: 0.4, blue: 1.0, opacity: 1.0),
+        canvasBackground: ThemeColor(red: 0.15, green: 0.10, blue: 0.20, opacity: 0.6),
+        canvasBorder: ThemeColor(red: 0.5, green: 0.35, blue: 0.65, opacity: 0.3),
+        placeholderFill: ThemeColor(red: 0.25, green: 0.18, blue: 0.32, opacity: 0.3),
+        materialStyle: .ultraThin
+    )
+    
+    static let emerald = AppTheme(
+        id: "emerald",
+        name: "Emerald",
+        isBuiltIn: true,
+        backgroundTop: ThemeColor(red: 0.08, green: 0.20, blue: 0.15, opacity: 1.0),
+        backgroundBottom: ThemeColor(red: 0.05, green: 0.12, blue: 0.10, opacity: 1.0),
+        containerBackground: ThemeColor(red: 0.12, green: 0.28, blue: 0.20, opacity: 0.4),
+        containerBorder: ThemeColor(red: 0.2, green: 0.5, blue: 0.35, opacity: 0.3),
+        primaryText: ThemeColor(red: 0.85, green: 1.0, blue: 0.90, opacity: 1.0),
+        secondaryText: ThemeColor(red: 0.6, green: 0.8, blue: 0.7, opacity: 1.0),
+        accentColor: ThemeColor(red: 0.2, green: 0.9, blue: 0.5, opacity: 1.0),
+        canvasBackground: ThemeColor(red: 0.06, green: 0.18, blue: 0.12, opacity: 0.6),
+        canvasBorder: ThemeColor(red: 0.2, green: 0.5, blue: 0.35, opacity: 0.3),
+        placeholderFill: ThemeColor(red: 0.12, green: 0.28, blue: 0.20, opacity: 0.3),
+        materialStyle: .ultraThin
+    )
+    
+    static let fire = AppTheme(
+        id: "fire",
+        name: "Fire",
+        isBuiltIn: true,
+        backgroundTop: ThemeColor(red: 0.25, green: 0.10, blue: 0.05, opacity: 1.0),
+        backgroundBottom: ThemeColor(red: 0.15, green: 0.05, blue: 0.02, opacity: 1.0),
+        containerBackground: ThemeColor(red: 0.35, green: 0.15, blue: 0.10, opacity: 0.4),
+        containerBorder: ThemeColor(red: 0.7, green: 0.3, blue: 0.2, opacity: 0.3),
+        primaryText: ThemeColor(red: 1.0, green: 0.9, blue: 0.8, opacity: 1.0),
+        secondaryText: ThemeColor(red: 0.9, green: 0.6, blue: 0.5, opacity: 1.0),
+        accentColor: ThemeColor(red: 1.0, green: 0.4, blue: 0.2, opacity: 1.0),
+        canvasBackground: ThemeColor(red: 0.20, green: 0.08, blue: 0.05, opacity: 0.6),
+        canvasBorder: ThemeColor(red: 0.7, green: 0.3, blue: 0.2, opacity: 0.3),
+        placeholderFill: ThemeColor(red: 0.35, green: 0.15, blue: 0.10, opacity: 0.3),
+        materialStyle: .ultraThin
+    )
+    
     static var builtInThemes: [AppTheme] {
-        [.dark, .light, .midnight, .sunset, .ocean]
+        [.dark, .light, .midnight, .sunset, .ocean, .forest, .neon, .monochrome, .amethyst, .emerald, .fire]
     }
 }
 

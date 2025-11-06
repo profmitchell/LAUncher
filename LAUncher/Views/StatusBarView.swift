@@ -2,7 +2,13 @@ import SwiftUI
 
 struct StatusBarView: View {
     @ObservedObject var session: PluginHostSession
+    @ObservedObject var themeManager: ThemeManager
     @Environment(\.colorScheme) private var colorScheme
+    
+    init(session: PluginHostSession) {
+        self.session = session
+        self.themeManager = session.themeManager
+    }
 
     var body: some View {
         HStack(spacing: 24) {
@@ -49,6 +55,7 @@ struct StatusBarView: View {
                 .frame(height: 1),
             alignment: .top
         )
+        .animation(.easeInOut(duration: 0.2), value: themeManager.currentTheme.id)
     }
 
     private func statusLabel(icon: String, title: String, value: String) -> some View {
@@ -67,15 +74,13 @@ struct StatusBarView: View {
     }
 
     private var statusBackground: Color {
-        colorScheme == .dark
-            ? Color.white.opacity(0.04)
-            : Color.white.opacity(0.75)
+        let theme = themeManager.currentTheme
+        return theme.containerBackground.color.opacity(0.75)
     }
 
     private var borderColor: Color {
-        colorScheme == .dark
-            ? Color.white.opacity(0.08)
-            : Color.black.opacity(0.08)
+        let theme = themeManager.currentTheme
+        return theme.containerBorder.color
     }
 
     private var formattedSampleRate: String {

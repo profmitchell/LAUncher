@@ -98,16 +98,70 @@ Enable musical typing to use your QWERTY keyboard as a MIDI controller. The on-s
 4. The mapping is saved automatically
 
 #### Themes
-Choose from built-in themes (Dark, Light, Midnight, Sunset, Ocean) or create custom themes. Access themes from the More menu.
+Choose from built-in themes (Dark, Light, Midnight, Sunset, Ocean, Forest, Neon, Monochrome, Amethyst, Emerald, Fire) or create custom themes. Themes update immediately when selected. Access themes from the More menu.
 
 #### Transport Control
 The transport play/pause button controls tempo synchronization. When playing, plugins like Serum will sync their LFOs and effects to the host BPM.
 
 #### Inspector Panel
-Toggle the sidebar inspector to access:
+Toggle the sidebar inspector (right side) to access:
 - Audio device selection (Input/Output)
 - MIDI input selection
 - Plugin information
+
+#### Left Sidebar
+The left sidebar provides quick access to:
+- Plugin loading and management
+- Transport controls (BPM, Play/Pause)
+- Engine status and controls
+- Quick tools (MIDI Learn, MCP Tools, AI Chat)
+- Musical Typing toggle
+
+---
+
+## MCP (Model Context Protocol) Integration
+
+LAUncher includes a built-in MCP server that enables AI-powered workflows for plugin control and patch management. The MCP server runs locally on port 5555 and exposes tools for interacting with your plugins programmatically.
+
+### MCP Server Features
+
+The MCP server provides the following tools:
+
+1. **get_parameters** - Retrieve all parameters from the current plugin with filtering options
+2. **set_parameters** - Batch update multiple parameter values
+3. **get_patch_snapshot** - Get a structured snapshot of the current patch state
+4. **set_patch_snapshot** - Apply a patch snapshot by ID or inline object
+5. **save_patch_to_library** - Save patches to a local JSON library with metadata
+6. **analyze_patch** - Get musical analysis and timbre descriptions
+7. **explain_parameters** - Get explanations of what parameters do in musical terms
+
+### Using MCP Tools
+
+Access MCP tools from the toolbar "More" menu → "MCP Tools". The MCP server runs automatically when LAUncher starts and is accessible at `http://localhost:5555`.
+
+### MCP Server Implementation
+
+The MCP server is implemented as a standalone Node.js/TypeScript server (`dev/mcp/launcher-server.js`) that communicates with LAUncher via HTTP API. See `MCP-PRD.md` for detailed API documentation.
+
+### Example MCP Usage
+
+```json
+{
+  "method": "tools/call",
+  "toolName": "get_parameters",
+  "arguments": {
+    "filter": {
+      "pathPrefix": "Filter",
+      "onlyAutomatable": true
+    }
+  }
+}
+```
+
+For more information, see:
+- `MCP-PRD.md` - Complete MCP server specification
+- `MCP-SERVER-STATUS.md` - Server implementation status
+- `dev/mcp/launcher-server.js` - MCP server implementation
 
 ---
 
@@ -216,15 +270,37 @@ If plugins aren't syncing to BPM:
 
 ## License
 
-Copyright © 2024 Mitchell Cohen. All rights reserved.
+**Personal Use License**
 
-This software is proprietary and confidential. Unauthorized copying, modification, distribution, or use of this software, via any medium, is strictly prohibited.
+Copyright © 2025 Mitchell Cohen  
+Professor of Sound Design & Production @ Berklee College of Music  
+Newton, MA
+
+All Rights Reserved
+
+This software is provided for personal, non-commercial use only. You may use, study, and modify this software for your own personal purposes. 
+
+**You may NOT:**
+- Sell, rent, lease, or commercialize this software
+- Use this software for any commercial or profit-generating purpose
+- Redistribute, republish, or distribute this software
+- Create derivative works for distribution
+
+See [LICENSE](LICENSE) for full terms and conditions.
+
+For commercial licensing inquiries, please contact Mitchell Cohen.
 
 ---
 
 ## Credits
 
 **LAUncher** is developed and maintained by **Mitchell Cohen**.
+
+**Mitchell Cohen**  
+Professor of Sound Design & Production @ Berklee College of Music  
+2025 Newton, MA
+
+All Rights Reserved
 
 Built with:
 - SwiftUI for modern, declarative UI

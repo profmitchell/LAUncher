@@ -2,10 +2,16 @@ import SwiftUI
 
 struct PluginCanvasView: View {
     @ObservedObject var session: PluginHostSession
+    @ObservedObject var themeManager: ThemeManager
     @Environment(\.colorScheme) private var colorScheme
     
+    init(session: PluginHostSession) {
+        self.session = session
+        self.themeManager = session.themeManager
+    }
+    
     private var theme: AppTheme {
-        session.themeManager.currentTheme
+        themeManager.currentTheme
     }
 
     var body: some View {
@@ -57,6 +63,7 @@ struct PluginCanvasView: View {
         .padding(.horizontal, 16)
         .padding(.top, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .animation(.easeInOut(duration: 0.2), value: themeManager.currentTheme.id)
     }
 
     private var placeholderFill: Color {
