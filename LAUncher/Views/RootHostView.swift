@@ -7,18 +7,29 @@ struct RootHostView: View {
     @State private var chatWindow: NSWindow?
     @State private var topBarHeight: CGFloat = 84
     @State private var mtOffset: CGSize = .zero
+    @State private var leftSidebarWidth: CGFloat = 240
+    @State private var rightSidebarWidth: CGFloat = 320
     
     var body: some View {
-        NavigationSplitView {
+        HStack(spacing: 0) {
             // Left Sidebar
             LeftSidebarView(session: session)
-        } detail: {
+                .frame(width: leftSidebarWidth)
+            
+            // Resizable Divider
+            ResizableDivider(
+                width: $leftSidebarWidth,
+                minWidth: 180,
+                maxWidth: 400,
+                isRightSide: false
+            )
+            
+            // Main Content
             ZStack(alignment: .bottom) {
                 VStack(spacing: 0) {
                     TopBarView(session: session, expanded: topBarHeight > 96)
                         .frame(height: topBarHeight, alignment: .top)
                         .overlay(
-                            // Drag handle overlay at the bottom edge of the top bar
                             ResizableBar(height: $topBarHeight, minHeight: 56, maxHeight: 180)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                         )
@@ -34,32 +45,33 @@ struct RootHostView: View {
                         .padding(.bottom, 12)
                 }
 
-                // Invisible key capture layer to turn QWERTY into MIDI when enabled
                 if session.isMusicalTypingEnabled {
                     MusicalTypingKeyCaptureView(manager: session.musicalTypingManager, enabled: true)
                         .frame(width: 0, height: 0)
                 }
 
-                // Enable trackpad rotation gestures in the window (no-op handler)
                 RotationGestureCatcherView()
                     .frame(width: 0, height: 0)
+            }
+            
+            // Right Sidebar (Inspector)
+            if session.isShowingInspector {
+                // Resizable Divider
+                ResizableDivider(
+                    width: $rightSidebarWidth,
+                    minWidth: 200,
+                    maxWidth: 500,
+                    isRightSide: true
+                )
                 
-                // Right-side inspector panel overlay
-                if session.isShowingInspector {
-                    VStack { Spacer() }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                        .overlay(
-                            InspectorPanelView(session: session)
-                                .padding(.top, 12)
-                                .padding(.trailing, 12),
-                            alignment: .topTrailing
-                        )
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
-                }
+                InspectorPanelView(session: session)
+                    .frame(width: rightSidebarWidth)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
         .frame(minWidth: 960, minHeight: 600)
         .animation(.easeInOut(duration: 0.2), value: session.themeManager.currentTheme.id)
+        .animation(.easeInOut(duration: 0.3), value: session.isShowingInspector)
         .sheet(isPresented: $session.isShowingPluginPicker) {
             PluginPickerView(session: session)
         }
@@ -120,6 +132,47 @@ struct RootHostView: View {
                     chatWindow = nil
                 }
             }
+        }
+    }
+
+    // MARK: - Resizable Divider
+    private struct ResizableDivider: View {
+        @Binding var width: CGFloat
+        let minWidth: CGFloat
+        let maxWidth: CGFloat
+        let isRightSide: Bool // true for right side (drag left), false for left side (drag right)
+        
+        @State private var isHovering = false
+        @State private var startingWidth: CGFloat = 0
+        
+        var body: some View {
+            ZStack {
+                Rectangle()
+                    .fill(Color.primary.opacity(isHovering ? 0.15 : 0.05))
+                    .frame(width: 4)
+                    .contentShape(Rectangle())
+                    .onHover { hovering in
+                        isHovering = hovering
+                        if hovering {
+                            NSCursor.resizeLeftRight.push()
+                        } else {
+                            NSCursor.pop()
+                        }
+                    }
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                if startingWidth == 0 { startingWidth = width }
+                                let delta = isRightSide ? -value.translation.width : value.translation.width
+                                let proposed = startingWidth + delta
+                                width = min(max(proposed, minWidth), maxWidth)
+                            }
+                            .onEnded { _ in
+                                startingWidth = 0
+                            }
+                    )
+            }
+            .frame(width: 4)
         }
     }
 

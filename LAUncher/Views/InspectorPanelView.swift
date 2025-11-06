@@ -8,15 +8,16 @@ struct InspectorPanelView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Header
             HStack {
-                Picker("", selection: $selection) {
-                    ForEach(Tab.allCases, id: \.self) { t in
-                        Text(t.rawValue).tag(t)
-                    }
-                }
-                .pickerStyle(.segmented)
-                Button(role: .cancel) { session.isShowingInspector = false } label: {
+                Text("Inspector")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    session.isShowingInspector = false
+                } label: {
                     Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.borderless)
             }
@@ -24,6 +25,19 @@ struct InspectorPanelView: View {
 
             Divider()
 
+            // Tab Picker
+            Picker("", selection: $selection) {
+                ForEach(Tab.allCases, id: \.self) { t in
+                    Text(t.rawValue).tag(t)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+
+            Divider()
+
+            // Content
             Group {
                 switch selection {
                 case .io:
@@ -33,7 +47,9 @@ struct InspectorPanelView: View {
                 }
             }
             .padding(12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
+        .frame(minWidth: 200, idealWidth: 320, maxWidth: 500)
         .background(session.themeManager.currentTheme.materialStyle.material)
     }
 

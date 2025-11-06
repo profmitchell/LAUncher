@@ -24,7 +24,7 @@ struct MusicalTypingView: View {
                 }
                 .buttonStyle(.bordered)
 
-                Text("QWERTY Musical Typing • Octave \(octaveOffset)")
+                Text("QWERTY Piano • Octave \(octaveOffset)")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 

@@ -22,7 +22,7 @@
 
 - 🎹 **Universal Plugin Support** - Load both AU 2 (traditional) and AUv3 (app extension) plugins seamlessly
 - 🎨 **Customizable Themes** - Choose from built-in themes or create your own custom color schemes
-- ⌨️ **Musical Typing** - Built-in QWERTY keyboard for playing notes without a MIDI controller
+- ⌨️ **QWERTY Piano** - Built-in QWERTY keyboard for playing notes without a MIDI controller
 - 🎛️ **MIDI Learn** - Map MIDI CC messages to plugin parameters with intuitive learn mode
 - 🎚️ **Transport Control** - Play/pause transport with accurate BPM sync for tempo-synced effects
 - 📊 **Parameter Export** - Export plugin parameters as JSON for backup and sharing
@@ -34,7 +34,33 @@
 
 ## Screenshots
 
-*Screenshots coming soon*
+<div align="center">
+
+### Main Interface
+![LAUncher Main Interface](docs/screenshots/launcher1.png)
+
+### Plugin View
+![LAUncher Plugin View](docs/screenshots/launcher2.png)
+
+### MIDI Learn & Mapping
+![MIDI Learn Dialog](docs/screenshots/Screenshot%202025-11-06%20at%2011.59.55%20AM.png)
+
+### Inspector Panel  
+![Inspector Panel](docs/screenshots/Screenshot%202025-11-06%20at%2012.00.20%20PM.png)
+
+### Theme Selection
+![Theme Selection](docs/screenshots/Screenshot%202025-11-06%20at%2012.00.33%20PM.png)
+
+### QWERTY Piano
+![QWERTY Piano](docs/screenshots/Screenshot%202025-11-06%20at%2012.00.56%20PM.png)
+
+</div>
+
+### Video Demo
+
+https://github.com/user-attachments/assets/AUMCPsmallsquare.mp4
+
+*Demo video showing LAUncher in action*
 
 ---
 
@@ -82,14 +108,14 @@ LAUncher automatically discovers plugins from standard macOS locations:
 1. **Launch LAUncher**
 2. **Load a Plugin** - Click "Load Plugin…" in the toolbar to browse available plugins
 3. **Select a Plugin** - Choose from the list of discovered Audio Units
-4. **Play Notes** - Use MIDI input, musical typing keyboard, or the on-screen keyboard
+4. **Play Notes** - Use MIDI input, QWERTY Piano keyboard, or the on-screen keyboard
 5. **Adjust Parameters** - Use the plugin's native UI to tweak settings
 6. **Control Transport** - Use the play/pause button to control BPM-synced effects
 
 ### Features Guide
 
-#### Musical Typing
-Enable musical typing to use your QWERTY keyboard as a MIDI controller. The on-screen keyboard can be toggled on/off and repositioned by dragging.
+#### QWERTY Piano
+Enable QWERTY Piano to use your QWERTY keyboard as a MIDI controller. The on-screen keyboard can be toggled on/off and repositioned by dragging.
 
 #### MIDI Learn
 1. Click "MIDI Learn" in the More menu
@@ -115,7 +141,7 @@ The left sidebar provides quick access to:
 - Transport controls (BPM, Play/Pause)
 - Engine status and controls
 - Quick tools (MIDI Learn, MCP Tools, AI Chat)
-- Musical Typing toggle
+- QWERTY Piano toggle
 
 ---
 

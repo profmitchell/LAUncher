@@ -35,11 +35,11 @@ struct TopBarView: View {
                         titleArea
                         Spacer()
                         actionButtons
+                        inspectorToggleButton
                         helpButton
                     }
                     HStack(spacing: 16) {
-                        inspectorButton
-                        Spacer(minLength: 8)
+                        Spacer()
                         moreMenu
                     }
                 }
@@ -49,7 +49,7 @@ struct TopBarView: View {
                         titleArea
                         Spacer(minLength: 12)
                         actionButtons
-                        inspectorButton
+                        inspectorToggleButton
                         helpButton
                         moreMenu
                     }
@@ -89,6 +89,28 @@ struct TopBarView: View {
         }
     }
 
+    private var inspectorToggleButton: some View {
+        Group {
+            if session.isShowingInspector {
+                Button {
+                    session.isShowingInspector.toggle()
+                } label: {
+                    Image(systemName: "music.note")
+                }
+                .buttonStyle(.borderedProminent)
+                .help("Hide Inspector")
+            } else {
+                Button {
+                    session.isShowingInspector.toggle()
+                } label: {
+                    Image(systemName: "music.note")
+                }
+                .buttonStyle(.bordered)
+                .help("Show Inspector")
+            }
+        }
+    }
+
     private var helpButton: some View {
         Button {
             session.isShowingHelp = true
@@ -97,16 +119,6 @@ struct TopBarView: View {
         }
         .buttonStyle(.bordered)
         .help("Show help and information")
-    }
-
-    private var inspectorButton: some View {
-        Button {
-            session.isShowingInspector.toggle()
-        } label: {
-            Label("Inspector", systemImage: "sidebar.right")
-        }
-        .buttonStyle(.bordered)
-        .help("Toggle inspector side panel")
     }
 
     private var moreMenu: some View {
@@ -126,6 +138,16 @@ struct TopBarView: View {
                 Button("Clear Default", systemImage: "star.slash") { session.clearDefaultPlugin() }
             }
             Divider()
+            if session.isShowingInspector {
+                Button("Hide Inspector", systemImage: "sidebar.right") {
+                    session.isShowingInspector = false
+                }
+            } else {
+                Button("Show Inspector", systemImage: "sidebar.right") {
+                    session.isShowingInspector = true
+                }
+            }
+            Divider()
             Menu("Theme", systemImage: "paintpalette") {
                 ForEach(session.themeManager.availableThemes) { theme in
                     Button {
@@ -142,9 +164,9 @@ struct TopBarView: View {
             }
             Divider()
             if session.isMusicalTypingVisible {
-                Button("Hide On-screen Keyboard", systemImage: "eye.slash") { session.isMusicalTypingVisible = false }
+                Button("Hide QWERTY Piano", systemImage: "eye.slash") { session.isMusicalTypingVisible = false }
             } else {
-                Button("Show On-screen Keyboard", systemImage: "eye") { session.isMusicalTypingVisible = true }
+                Button("Show QWERTY Piano", systemImage: "eye") { session.isMusicalTypingVisible = true }
             }
         } label: {
             Label("More", systemImage: "ellipsis.circle")

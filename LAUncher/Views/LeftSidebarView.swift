@@ -114,7 +114,7 @@ struct LeftSidebarView: View {
                 }
                 
                 Toggle(isOn: $session.isMusicalTypingEnabled) {
-                    Label("Musical Typing", systemImage: "keyboard")
+                    Label("QWERTY Piano", systemImage: "keyboard")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .toggleStyle(.button)
@@ -123,7 +123,7 @@ struct LeftSidebarView: View {
             
             Spacer()
         }
-        .frame(minWidth: 200, idealWidth: 240, maxWidth: 280)
+        .frame(minWidth: 180, idealWidth: 240, maxWidth: 400)
         .background(.ultraThinMaterial)
     }
     
