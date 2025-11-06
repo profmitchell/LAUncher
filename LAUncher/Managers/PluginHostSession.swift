@@ -22,6 +22,12 @@ final class PluginHostSession: ObservableObject {
     @Published private(set) var lastErrorDescription: String?
     @Published private(set) var sampleRate: Double = 0
     @Published private(set) var bufferDuration: TimeInterval = 0
+    @Published var bpm: Double = 120 {
+        didSet { engineManager.setTempo(bpm) }
+    }
+    @Published var isTransportPlaying: Bool = true {
+        didSet { engineManager.setTransportPlaying(isTransportPlaying) }
+    }
     @Published private(set) var lastMidiEvent: MidiEvent?
 
     @Published var isShowingPluginPicker = false
@@ -31,6 +37,7 @@ final class PluginHostSession: ObservableObject {
     @Published var isShowingMCPTools = false
     @Published var isShowingMIDIMap = false
     @Published var isShowingChat = false
+    @Published var isShowingInspector = false
     @Published var exportedParameterJSON: String = ""
     
     // Parameter analysis cache
@@ -79,11 +86,8 @@ final class PluginHostSession: ObservableObject {
         if selectedInputDevice == nil {
             selectedInputDevice = audioDeviceManager.inputDevices.first
         }
-        if selectedOutput1 == nil {
-            selectedOutput1 = audioDeviceManager.outputDevices.first
-        }
-        if selectedOutput2 == nil {
-            selectedOutput2 = audioDeviceManager.outputDevices.first
+        if selectedOutputDevice == nil {
+            selectedOutputDevice = audioDeviceManager.outputDevices.first
         }
         
         // Start MCP HTTP server on port 5555 (on background thread to avoid blocking UI)
@@ -112,6 +116,10 @@ final class PluginHostSession: ObservableObject {
             try? await Task.sleep(nanoseconds: 150_000_000)
             await self.loadDefaultPluginIfAvailable()
         }
+
+        // Initialize engine tempo and transport
+        engineManager.setTempo(bpm)
+        engineManager.setTransportPlaying(isTransportPlaying)
     }
 
     // MARK: - Master Gain
@@ -127,24 +135,10 @@ final class PluginHostSession: ObservableObject {
         }
     }
     
-    @Published var selectedOutput1: AudioDevice? {
+    @Published var selectedOutputDevice: AudioDevice? {
         didSet {
-            // Debounce to avoid rapid calls during initialization
-            if selectedOutput1 != oldValue && oldValue != nil {
-                Task {
-                    try? engineManager.setOutputDevices(output1: selectedOutput1, output2: selectedOutput2)
-                }
-            }
-        }
-    }
-    
-    @Published var selectedOutput2: AudioDevice? {
-        didSet {
-            // Debounce to avoid rapid calls during initialization
-            if selectedOutput2 != oldValue && oldValue != nil {
-                Task {
-                    try? engineManager.setOutputDevices(output1: selectedOutput1, output2: selectedOutput2)
-                }
+            if selectedOutputDevice != oldValue {
+                Task { try? engineManager.setOutputDevice(selectedOutputDevice) }
             }
         }
     }
@@ -377,6 +371,10 @@ final class PluginHostSession: ObservableObject {
         }) {
             await load(component: matched)
         }
+    }
+
+    func toggleTransport() {
+        isTransportPlaying.toggle()
     }
 
     func toggleEngineRunning() {

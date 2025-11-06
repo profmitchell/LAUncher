@@ -9,30 +9,45 @@ struct RootHostView: View {
     @State private var mtOffset: CGSize = .zero
     
     var body: some View {
-        ZStack(alignment: .bottom) {
-            VStack(spacing: 0) {
-                TopBarView(session: session, expanded: topBarHeight > 96)
-                    .frame(height: topBarHeight, alignment: .top)
-                    .overlay(
-                        // Drag handle overlay at the bottom edge of the top bar
-                        ResizableBar(height: $topBarHeight, minHeight: 56, maxHeight: 180)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                    )
-
-                PluginCanvasView(session: session)
-                StatusBarView(session: session)
+        NavigationSplitView {
+            // Sidebar (Inspector)
+            if session.isShowingInspector {
+                InspectorPanelView(session: session)
+                    .frame(minWidth: 280, idealWidth: 320, maxWidth: 400)
+            } else {
+                Color.clear
+                    .frame(width: 0)
             }
-            .background(backgroundGradient.ignoresSafeArea())
+        } detail: {
+            ZStack(alignment: .bottom) {
+                VStack(spacing: 0) {
+                    TopBarView(session: session, expanded: topBarHeight > 96)
+                        .frame(height: topBarHeight, alignment: .top)
+                        .overlay(
+                            // Drag handle overlay at the bottom edge of the top bar
+                            ResizableBar(height: $topBarHeight, minHeight: 56, maxHeight: 180)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                        )
 
-            if session.isMusicalTypingEnabled && session.isMusicalTypingVisible {
-                DraggableMusicalTyping(session: session, offset: $mtOffset)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .padding(.bottom, 12)
-            }
+                    PluginCanvasView(session: session)
+                    StatusBarView(session: session)
+                }
+                .background(backgroundGradient.ignoresSafeArea())
 
-            // Invisible key capture layer to turn QWERTY into MIDI when enabled
-            if session.isMusicalTypingEnabled {
-                MusicalTypingKeyCaptureView(manager: session.musicalTypingManager, enabled: true)
+                if session.isMusicalTypingEnabled && session.isMusicalTypingVisible {
+                    DraggableMusicalTyping(session: session, offset: $mtOffset)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .padding(.bottom, 12)
+                }
+
+                // Invisible key capture layer to turn QWERTY into MIDI when enabled
+                if session.isMusicalTypingEnabled {
+                    MusicalTypingKeyCaptureView(manager: session.musicalTypingManager, enabled: true)
+                        .frame(width: 0, height: 0)
+                }
+
+                // Enable trackpad rotation gestures in the window (no-op handler)
+                RotationGestureCatcherView()
                     .frame(width: 0, height: 0)
             }
         }

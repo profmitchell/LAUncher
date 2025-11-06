@@ -12,12 +12,15 @@ final class AudioEngineManager: ObservableObject {
     private var toneGeneratorPhase: UnsafeMutablePointer<Double>?
     private var inputNode: AVAudioInputNode?
     private var outputNode1: AVAudioOutputNode?
-    private var outputNode2: AVAudioOutputNode?
     private var currentPluginType: OSType = 0
 
     @Published private(set) var isRunning = false
     @Published private(set) var lastError: Error?
     @Published private(set) var masterGain: Float = 0.8
+    @Published private(set) var tempoBPM: Double = 120
+    @Published private(set) var isTransportPlaying: Bool = true
+    private var transportStartHostTime: UInt64 = AudioGetCurrentHostTime()
+    private var transportBeatOffset: Double = 0
 
     init() {
         configureMainMixerConnection()
@@ -68,6 +71,16 @@ final class AudioEngineManager: ObservableObject {
         let clamped = max(0.0, min(1.0, value))
         masterGain = clamped
         engine.mainMixerNode.outputVolume = clamped
+    }
+
+    func setTempo(_ bpm: Double) {
+        let clamped = max(10.0, min(400.0, bpm))
+        tempoBPM = clamped
+        // When tempo changes, reset transport timing to avoid beat position jumps
+        if isTransportPlaying {
+            transportStartHostTime = AudioGetCurrentHostTime()
+            transportBeatOffset = 0
+        }
     }
 
     func unloadPlugin() {
@@ -145,6 +158,9 @@ final class AudioEngineManager: ObservableObject {
         if !engine.isRunning {
             try startEngine()
         }
+
+        // Install host sync blocks so AUv3s can query tempo/transport
+        installHostSync(on: newNode.auAudioUnit)
 
         return newNode
     }
@@ -371,24 +387,23 @@ final class AudioEngineManager: ObservableObject {
         }
     }
     
-    func setOutputDevices(output1: AudioDevice?, output2: AudioDevice?) throws {
+    func setOutputDevice(_ device: AudioDevice?) throws {
         // Stop engine first
         let wasRunning = isRunning
         if isRunning {
             stopEngine()
         }
         
-        // Configure output device 1 (primary stereo output)
-        // AVAudioEngine only supports one output device
-        // We use output1 as primary, output2 is tracked but uses same hardware output
-        if let device1 = output1 {
+        // Configure output device (primary stereo output)
+        // AVAudioEngine supports one hardware output. We map to system default output.
+        if let device = device {
             var propertyAddress = AudioObjectPropertyAddress(
                 mSelector: kAudioHardwarePropertyDefaultOutputDevice,
                 mScope: kAudioObjectPropertyScopeGlobal,
                 mElement: kAudioObjectPropertyElementMain
             )
             
-            var deviceID = device1.id
+            var deviceID = device.id
             let dataSize = UInt32(MemoryLayout<AudioDeviceID>.size)
             let status = AudioObjectSetPropertyData(
                 AudioObjectID(kAudioObjectSystemObject),
@@ -400,20 +415,26 @@ final class AudioEngineManager: ObservableObject {
             )
             
             if status != noErr {
-                throw NSError(domain: "AudioEngineManager", code: Int(status), userInfo: [NSLocalizedDescriptionKey: "Failed to set output device 1"])
+                throw NSError(domain: "AudioEngineManager", code: Int(status), userInfo: [NSLocalizedDescriptionKey: "Failed to set output device"])
+            }
+        } else {
+            // No output requested: effectively mute by disconnecting mixer from hardware
+            let mainMixer = engine.mainMixerNode
+            let output = engine.outputNode
+            if engine.outputConnectionPoints(for: mainMixer, outputBus: 0).contains(where: { $0.node == output }) {
+                engine.disconnectNodeInput(output)
             }
         }
-        
-        outputNode1 = output1 != nil ? engine.outputNode : nil
-        
-        // Note: Output 2 would require a separate audio engine or multi-output setup
-        // For now, we track it but use the same output node
-        // In a future implementation, we could create an aggregate device or second engine
-        outputNode2 = output2 != nil ? engine.outputNode : nil
-        
-        // Don't reconfigure routing - just ensure mixer is connected
-        // This prevents breaking existing connections
-        configureMainMixerConnection()
+
+        outputNode1 = device != nil ? engine.outputNode : nil
+
+        // Ensure mixer/hardware wiring reflects current choice
+        if device != nil {
+            configureMainMixerConnection()
+            engine.mainMixerNode.outputVolume = masterGain
+        } else {
+            engine.mainMixerNode.outputVolume = 0
+        }
         
         // Restart if was running
         if wasRunning {
@@ -502,6 +523,90 @@ final class AudioEngineManager: ObservableObject {
 
         if !engine.outputConnectionPoints(for: mainMixer, outputBus: 0).contains(where: { $0.node == output }) {
             engine.connect(mainMixer, to: output, format: format.channelCount > 0 ? format : nil)
+        }
+    }
+
+    // MARK: - Host Sync Helpers
+    private func currentElapsedSeconds() -> Double {
+        let now = AudioGetCurrentHostTime()
+        let delta = now &- transportStartHostTime
+        let nanos = AudioConvertHostTimeToNanos(delta)
+        return Double(nanos) / 1_000_000_000.0
+    }
+
+    private func currentBeatPosition() -> Double {
+        guard isTransportPlaying else {
+            return transportBeatOffset
+        }
+        let beatsPerSecond = tempoBPM / 60.0
+        return transportBeatOffset + currentElapsedSeconds() * beatsPerSecond
+    }
+
+    func setTransportPlaying(_ playing: Bool) {
+        if playing == isTransportPlaying { return }
+        
+        if playing {
+            // Resuming: preserve current beat position (from when paused), reset start time
+            let preservedBeat = transportBeatOffset
+            transportBeatOffset = preservedBeat
+            transportStartHostTime = AudioGetCurrentHostTime()
+        } else {
+            // Pausing: freeze beat at current position
+            // Calculate current beat before pausing
+            let beatsPerSecond = tempoBPM / 60.0
+            let currentBeat = transportBeatOffset + currentElapsedSeconds() * beatsPerSecond
+            transportBeatOffset = currentBeat
+        }
+        
+        isTransportPlaying = playing
+    }
+
+    private func installHostSync(on au: AUAudioUnit) {
+        if #available(macOS 10.13, *) {
+            au.musicalContextBlock = { (tempo: UnsafeMutablePointer<Double>?,
+                                        timeSignatureNumerator: UnsafeMutablePointer<Double>?,
+                                        timeSignatureDenominator: UnsafeMutablePointer<Int>?,
+                                        currentBeatPosition: UnsafeMutablePointer<Double>?,
+                                        sampleOffsetToNextBeat: UnsafeMutablePointer<Int>?,
+                                        currentMeasureDownbeat: UnsafeMutablePointer<Double>?) -> Bool in
+                if let tempo { tempo.pointee = self.tempoBPM }
+                if let timeSignatureNumerator { timeSignatureNumerator.pointee = 4.0 }
+                if let timeSignatureDenominator { timeSignatureDenominator.pointee = 4 }
+                if let currentBeatPosition { currentBeatPosition.pointee = self.currentBeatPosition() }
+                if let sampleOffsetToNextBeat {
+                    let beats = self.currentBeatPosition()
+                    let nextBeat = ceil(beats)
+                    let beatOffset = nextBeat - beats
+                    let samplesPerBeat = (60.0 / self.tempoBPM) * self.sampleRate
+                    sampleOffsetToNextBeat.pointee = Int(beatOffset * samplesPerBeat)
+                }
+                if let currentMeasureDownbeat {
+                    let beats = self.currentBeatPosition()
+                    currentMeasureDownbeat.pointee = floor(beats / 4.0) * 4.0
+                }
+                return true
+            }
+
+            au.transportStateBlock = { (transportStateFlags: UnsafeMutablePointer<AUHostTransportStateFlags>?,
+                                         currentSamplePosition: UnsafeMutablePointer<Double>?,
+                                         currentBeatPosition: UnsafeMutablePointer<Double>?,
+                                         currentSampleTime: UnsafeMutablePointer<Double>?) -> Bool in
+                if let transportStateFlags {
+                    var flags = AUHostTransportStateFlags()
+                    if self.isTransportPlaying { flags.insert(.moving) }
+                    transportStateFlags.pointee = flags
+                }
+                if let currentSamplePosition {
+                    currentSamplePosition.pointee = self.currentElapsedSeconds() * self.sampleRate
+                }
+                if let currentBeatPosition {
+                    currentBeatPosition.pointee = self.currentBeatPosition()
+                }
+                if let currentSampleTime {
+                    currentSampleTime.pointee = self.currentElapsedSeconds()
+                }
+                return true
+            }
         }
     }
 }

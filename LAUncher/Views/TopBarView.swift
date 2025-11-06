@@ -30,7 +30,9 @@ struct TopBarView: View {
                     }
                     HStack(spacing: 16) {
                         engineControls
-                        ioButton
+                        transportControl
+                        tempoControl
+                        inspectorButton
                         Spacer(minLength: 8)
                         musicalTypingToggle
                         moreMenu
@@ -43,7 +45,9 @@ struct TopBarView: View {
                         Spacer(minLength: 12)
                         actionButtons
                         engineControls
-                        ioButton
+                        transportControl
+                        tempoControl
+                        inspectorButton
                         musicalTypingToggle
                         moreMenu
                     }
@@ -80,23 +84,14 @@ struct TopBarView: View {
         }
     }
 
-    private var ioButton: some View {
+    private var inspectorButton: some View {
         Button {
-            showIOPopover.toggle()
+            session.isShowingInspector.toggle()
         } label: {
-            Label("I/O", systemImage: "slider.horizontal.3")
+            Label("Inspector", systemImage: "sidebar.right")
         }
         .buttonStyle(.bordered)
-        .popover(isPresented: $showIOPopover, arrowEdge: .bottom) {
-            VStack(alignment: .leading, spacing: 12) {
-                audioControls
-                Divider()
-                midiControls
-            }
-            .padding(12)
-            .frame(width: 460)
-        }
-        .help("Audio and MIDI device selection")
+        .help("Toggle inspector side panel")
     }
 
     private var moreMenu: some View {
@@ -147,6 +142,30 @@ struct TopBarView: View {
         }
     }
 
+    private var transportControl: some View {
+        Button {
+            session.toggleTransport()
+        } label: {
+            Label(session.isTransportPlaying ? "Pause" : "Play",
+                  systemImage: session.isTransportPlaying ? "pause.circle" : "play.circle.fill")
+        }
+        .buttonStyle(.bordered)
+        .help("Play/Pause transport (affects BPM sync)")
+    }
+
+    private var tempoControl: some View {
+        HStack(spacing: 6) {
+            Label("BPM", systemImage: "metronome")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField("BPM", value: $session.bpm, format: .number)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 60)
+            Stepper("", value: Binding(get: { Int(session.bpm) }, set: { session.bpm = Double($0) }), in: 10...400)
+                .labelsHidden()
+        }
+    }
+
     private var audioControls: some View {
         VStack(spacing: 4) {
             HStack(spacing: 8) {
@@ -164,24 +183,10 @@ struct TopBarView: View {
             }
             
             HStack(spacing: 8) {
-                // OUTPUT 1 (stereo)
-                Label("Output 1", systemImage: "speaker.wave.2")
+                Label("Output", systemImage: "speaker.wave.2")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Picker("Output 1", selection: $session.selectedOutput1) {
-                    Text("None").tag(Optional<AudioDevice>.none)
-                    ForEach(session.outputDevices) { device in
-                        Text(device.name).tag(Optional(device))
-                    }
-                }
-                .pickerStyle(.menu)
-                .frame(width: 150)
-                
-                // OUTPUT 2 (stereo)
-                Label("Output 2", systemImage: "speaker.wave.2")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Picker("Output 2", selection: $session.selectedOutput2) {
+                Picker("Output", selection: $session.selectedOutputDevice) {
                     Text("None").tag(Optional<AudioDevice>.none)
                     ForEach(session.outputDevices) { device in
                         Text(device.name).tag(Optional(device))
