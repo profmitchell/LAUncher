@@ -7,6 +7,60 @@
  */
 
 const readline = require('readline');
+const http = require('http');
+
+// HTTP API Configuration
+const HTTP_API_URL = 'http://localhost:5555';
+const USE_REAL_API = true; // Set to false to use mock data
+
+// HTTP client helper
+async function httpRequest(method, path, body = null) {
+    return new Promise((resolve, reject) => {
+        const url = new URL(path, HTTP_API_URL);
+        const options = {
+            hostname: url.hostname,
+            port: url.port || 5555,
+            path: url.pathname,
+            method: method,
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        };
+
+        const req = http.request(options, (res) => {
+            let data = '';
+            res.on('data', (chunk) => { data += chunk; });
+            res.on('end', () => {
+                try {
+                    const json = JSON.parse(data);
+                    resolve(json);
+                } catch (e) {
+                    resolve(data);
+                }
+            });
+        });
+
+        req.on('error', (error) => {
+            reject(error);
+        });
+
+        if (body) {
+            req.write(JSON.stringify(body));
+        }
+        req.end();
+    });
+}
+
+// Check if HTTP API is available
+async function checkAPIAvailable() {
+    if (!USE_REAL_API) return false;
+    try {
+        await httpRequest('GET', '/health');
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
 
 // Mock plugin data for initial implementation
 let mockParameters = {
@@ -125,11 +179,49 @@ const tools = [
             },
             required: ["parameterIds"]
         }
+    },
+    {
+        name: "randomize_parameters",
+        description: "Intelligently randomize parameters with reasonable variations, preserving musical character.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                intensity: { type: "number", minimum: 0.0, maximum: 1.0, default: 0.4, description: "Randomization intensity (0.0 = subtle, 1.0 = wild)" },
+                preserveCategories: { type: "array", items: { type: "string" }, description: "Parameter categories to preserve (e.g., ['Filter', 'Envelope 1'])" },
+                excludeIds: { type: "array", items: { type: "string" }, description: "Parameter IDs to exclude from randomization" }
+            }
+        }
     }
 ];
 
 // Tool implementations
-function handleGetParameters(args) {
+async function handleGetParameters(args) {
+    // Try HTTP API first
+    const apiAvailable = await checkAPIAvailable();
+    if (apiAvailable) {
+        try {
+            const response = await httpRequest('POST', '/api/get_parameters', {});
+            let filtered = response.parameters || [];
+            
+            if (args.filter) {
+                if (args.filter.pathPrefix) {
+                    filtered = filtered.filter(p => p.path?.startsWith(args.filter.pathPrefix));
+                }
+                if (args.filter.onlyAutomatable !== undefined) {
+                    // Filter automatable parameters if needed
+                }
+            }
+            
+            return {
+                plugin: response.plugin || currentPlugin,
+                parameters: filtered
+            };
+        } catch (error) {
+            console.error('HTTP API error, falling back to mock:', error.message);
+        }
+    }
+    
+    // Fallback to mock data
     let filtered = Object.values(mockParameters);
     
     if (args.filter) {
@@ -138,7 +230,6 @@ function handleGetParameters(args) {
         }
         if (args.filter.onlyAutomatable !== undefined) {
             // In mock, all parameters are automatable
-            // In real implementation, would check parameter flags
         }
     }
     
@@ -148,7 +239,21 @@ function handleGetParameters(args) {
     };
 }
 
-function handleSetParameters(args) {
+async function handleSetParameters(args) {
+    // Try HTTP API first
+    const apiAvailable = await checkAPIAvailable();
+    if (apiAvailable) {
+        try {
+            const response = await httpRequest('POST', '/api/set_parameters', {
+                changes: args.changes
+            });
+            return response;
+        } catch (error) {
+            console.error('HTTP API error, falling back to mock:', error.message);
+        }
+    }
+    
+    // Fallback to mock data
     const applied = [];
     
     for (const change of args.changes) {
@@ -358,6 +463,118 @@ function handleExplainParameters(args) {
     return { explanations };
 }
 
+async function handleRandomizeParameters(args) {
+    // Try HTTP API first
+    const apiAvailable = await checkAPIAvailable();
+    if (apiAvailable) {
+        try {
+            const response = await httpRequest('POST', '/api/randomize_parameters', {
+                intensity: args.intensity || 0.4,
+                preserveCategories: args.preserveCategories || []
+            });
+            return response;
+        } catch (error) {
+            console.error('HTTP API error, falling back to mock:', error.message);
+        }
+    }
+    
+    // Fallback to mock data
+    const intensity = Math.max(0.0, Math.min(1.0, args.intensity || 0.4));
+    const preserveCategories = args.preserveCategories || [];
+    const excludeIds = args.excludeIds || [];
+    
+    const applied = [];
+    let randomizedCount = 0;
+    
+    // Get all parameters
+    const allParams = Object.values(mockParameters);
+    
+    for (const param of allParams) {
+        // Skip if excluded
+        if (excludeIds.includes(param.id)) {
+            continue;
+        }
+        
+        // Skip if category should be preserved
+        let shouldPreserve = false;
+        for (const category of preserveCategories) {
+            if (param.path.startsWith(category)) {
+                shouldPreserve = true;
+                break;
+            }
+        }
+        if (shouldPreserve) {
+            continue;
+        }
+        
+        // Intelligent randomization based on parameter type
+        const range = param.max - param.min;
+        const currentValue = param.value;
+        
+        // Calculate variation amount based on intensity
+        // Lower intensity = smaller variations around current value
+        // Higher intensity = larger variations across full range
+        let variationAmount;
+        if (intensity < 0.5) {
+            // Subtle: vary within 10-30% of range centered on current value
+            variationAmount = range * (0.1 + intensity * 0.4);
+        } else {
+            // More wild: vary within 30-100% of range
+            variationAmount = range * (0.3 + (intensity - 0.5) * 1.4);
+        }
+        
+        // Special handling for different parameter types
+        let newValue;
+        
+        if (param.unit === "Hz" && param.id.includes("cutoff")) {
+            // Filter cutoff: prefer musical ranges
+            // Map to logarithmic space for more musical variation
+            const logMin = Math.log10(param.min);
+            const logMax = Math.log10(param.max);
+            const logCurrent = Math.log10(Math.max(param.min, Math.min(param.max, currentValue)));
+            const logVariation = (logMax - logMin) * variationAmount / range;
+            const logNew = logCurrent + (Math.random() - 0.5) * logVariation * 2;
+            newValue = Math.pow(10, Math.max(logMin, Math.min(logMax, logNew)));
+        } else if (param.path.includes("Wave") || param.path.includes("wave")) {
+            // Waveform: discrete selection
+            const waveOptions = [0, 1, 2, 3, 4, 5]; // Common waveforms
+            newValue = waveOptions[Math.floor(Math.random() * waveOptions.length)];
+        } else if (param.path.includes("Voices") || param.path.includes("voices")) {
+            // Voices: discrete integer values
+            const minVoices = Math.max(1, Math.floor(param.min));
+            const maxVoices = Math.floor(param.max);
+            newValue = Math.floor(Math.random() * (maxVoices - minVoices + 1)) + minVoices;
+        } else if (param.path.includes("Envelope") || param.path.includes("env")) {
+            // Envelope times: exponential variation for more musical feel
+            const logMin = Math.log10(Math.max(0.001, param.min));
+            const logMax = Math.log10(param.max);
+            const logCurrent = Math.log10(Math.max(0.001, currentValue));
+            const logVariation = (logMax - logMin) * variationAmount / range;
+            const logNew = logCurrent + (Math.random() - 0.5) * logVariation * 2;
+            newValue = Math.pow(10, Math.max(logMin, Math.min(logMax, logNew)));
+        } else {
+            // Default: vary around current value with Gaussian-like distribution
+            const offset = (Math.random() - 0.5) * variationAmount * 2;
+            newValue = currentValue + offset;
+        }
+        
+        // Clamp to valid range
+        newValue = Math.max(param.min, Math.min(param.max, newValue));
+        
+        // Update parameter
+        mockParameters[param.id].value = newValue;
+        applied.push({ id: param.id, value: newValue });
+        randomizedCount++;
+    }
+    
+    return {
+        result: "ok",
+        applied,
+        intensity,
+        randomizedCount
+    };
+}
+
 // JSON-RPC 2.0 handler
 const rl = readline.createInterface({
     input: process.stdin,
@@ -365,7 +582,7 @@ const rl = readline.createInterface({
     terminal: false
 });
 
-rl.on('line', (line) => {
+rl.on('line', async (line) => {
     try {
         const request = JSON.parse(line);
         
@@ -389,10 +606,10 @@ rl.on('line', (line) => {
             try {
                 switch (toolName) {
                     case "get_parameters":
-                        result = handleGetParameters(args || {});
+                        result = await handleGetParameters(args || {});
                         break;
                     case "set_parameters":
-                        result = handleSetParameters(args);
+                        result = await handleSetParameters(args);
                         break;
                     case "get_patch_snapshot":
                         result = handleGetPatchSnapshot(args || {});
@@ -408,6 +625,9 @@ rl.on('line', (line) => {
                         break;
                     case "explain_parameters":
                         result = handleExplainParameters(args);
+                        break;
+                    case "randomize_parameters":
+                        result = await handleRandomizeParameters(args || {});
                         break;
                     default:
                         throw new Error(`Unknown tool: ${toolName}`);

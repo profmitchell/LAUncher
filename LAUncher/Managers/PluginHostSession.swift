@@ -27,6 +27,7 @@ final class PluginHostSession: ObservableObject {
     @Published var isShowingPluginPicker = false
     @Published var isMusicalTypingEnabled = false
     @Published var isShowingParameterExport = false
+    @Published var isShowingMCPTools = false
     @Published var exportedParameterJSON: String = ""
     @Published var selectedMidiSource: MidiSource? {
         didSet {
@@ -43,40 +44,11 @@ final class PluginHostSession: ObservableObject {
     let engineManager = AudioEngineManager()
     let midiManager = MidiManager()
     let audioDeviceManager = AudioDeviceManager()
-
-    @Published var selectedInputDevice: AudioDevice? {
-        didSet {
-            if selectedInputDevice != oldValue {
-                try? engineManager.setInputDevice(selectedInputDevice)
-            }
-        }
-    }
-    
-    @Published var selectedOutput1: AudioDevice? {
-        didSet {
-            if selectedOutput1 != oldValue {
-                try? engineManager.setOutputDevices(output1: selectedOutput1, output2: selectedOutput2)
-            }
-        }
-    }
-    
-    @Published var selectedOutput2: AudioDevice? {
-        didSet {
-            if selectedOutput2 != oldValue {
-                try? engineManager.setOutputDevices(output1: selectedOutput1, output2: selectedOutput2)
-            }
-        }
-    }
-    
-    var inputDevices: [AudioDevice] {
-        audioDeviceManager.inputDevices
-    }
-    
-    var outputDevices: [AudioDevice] {
-        audioDeviceManager.outputDevices
-    }
-
+    let midiMapManager = MIDIMapManager()
     private var cancellables: Set<AnyCancellable> = []
+    private var mcpServer: MCPServerManager?
+    
+    @Published var isShowingMIDIMap = false
 
     init() {
         observeEngine()
@@ -96,6 +68,58 @@ final class PluginHostSession: ObservableObject {
         if selectedOutput2 == nil {
             selectedOutput2 = audioDeviceManager.outputDevices.first
         }
+        
+        // Start MCP HTTP server on port 5555 (on background thread to avoid blocking UI)
+        Task.detached(priority: .background) { [weak self] in
+            guard let self else { return }
+            await MainActor.run {
+                guard self.mcpServer == nil else {
+                    print("⚠️ MCP server already exists")
+                    return
+                }
+                let server = MCPServerManager(session: self)
+                self.mcpServer = server
+                try? server.start()
+            }
+        }
+    }
+
+    @Published var selectedInputDevice: AudioDevice? {
+        didSet {
+            if selectedInputDevice != oldValue {
+                try? engineManager.setInputDevice(selectedInputDevice)
+            }
+        }
+    }
+    
+    @Published var selectedOutput1: AudioDevice? {
+        didSet {
+            // Debounce to avoid rapid calls during initialization
+            if selectedOutput1 != oldValue && oldValue != nil {
+                Task {
+                    try? engineManager.setOutputDevices(output1: selectedOutput1, output2: selectedOutput2)
+                }
+            }
+        }
+    }
+    
+    @Published var selectedOutput2: AudioDevice? {
+        didSet {
+            // Debounce to avoid rapid calls during initialization
+            if selectedOutput2 != oldValue && oldValue != nil {
+                Task {
+                    try? engineManager.setOutputDevices(output1: selectedOutput1, output2: selectedOutput2)
+                }
+            }
+        }
+    }
+    
+    var inputDevices: [AudioDevice] {
+        audioDeviceManager.inputDevices
+    }
+    
+    var outputDevices: [AudioDevice] {
+        audioDeviceManager.outputDevices
     }
 
     func refreshInstrumentList() {
@@ -307,7 +331,52 @@ final class PluginHostSession: ObservableObject {
 
     private func observeMidi() {
         midiManager.eventHandler = { [weak self] event in
-            self?.handleMidi(event: event)
+            guard let self else { return }
+            
+            // Handle MIDI CC mappings
+            let status = event.statusByte
+            let ccStatus: UInt8 = 0xB0
+            
+            if (status & 0xF0) == ccStatus {
+                let ccNumber = event.data1
+                let ccValue = event.data2
+                
+                // Check if we're learning
+                if midiMapManager.isLearning, let paramId = midiMapManager.learningParameterId {
+                    // Create new mapping
+                    if let param = self.findParameter(identifier: paramId) {
+                        let mapping = MIDIMapping(
+                            parameterId: paramId,
+                            parameterDisplayName: param.displayName,
+                            ccNumber: ccNumber,
+                            minValue: param.minValue,
+                            maxValue: param.maxValue
+                        )
+                        midiMapManager.mappings.append(mapping)
+                        midiMapManager.isLearning = false
+                        midiMapManager.learningParameterId = nil
+                        midiMapManager.lastCCReceived = ccNumber
+                        return // Handled
+                    }
+                }
+                
+                // Apply existing mappings
+                if let mapping = midiMapManager.mappings.first(where: { $0.ccNumber == ccNumber }),
+                   let param = self.findParameter(identifier: mapping.parameterId) {
+                    // Convert MIDI CC (0-127) to parameter value
+                    let normalizedValue = Float(ccValue) / 127.0
+                    let paramValue = mapping.minValue + (normalizedValue * (mapping.maxValue - mapping.minValue))
+                    
+                    // Set parameter value
+                    let clampedValue = max(param.minValue, min(param.maxValue, AUValue(paramValue)))
+                    param.setValue(clampedValue, originator: nil)
+                    
+                    return // Handled
+                }
+            }
+            
+            // Handle regular MIDI events (notes, etc.)
+            self.handleMidi(event: event)
         }
 
         midiManager.$availableSources
@@ -516,5 +585,286 @@ final class PluginHostSession: ObservableObject {
                 }
             }
         }
+    }
+    
+    // MARK: - MCP Methods
+    
+    func getCurrentParameters() -> [AUParameter]? {
+        guard let audioUnit = engineManager.auAudioUnit,
+              let parameterTree = audioUnit.parameterTree else {
+            return nil
+        }
+        return Array(parameterTree.allParameters)
+    }
+    
+    func getOscillatorParameters(oscNumber: Int = 1) -> [AUParameter]? {
+        guard let params = getCurrentParameters() else { return nil }
+        let oscPrefix = "osc\(oscNumber)_"
+        return params.filter { param in
+            param.identifier.lowercased().hasPrefix(oscPrefix) ||
+            param.displayName.lowercased().contains("oscillator \(oscNumber)")
+        }
+    }
+    
+    func getParametersByCategory() -> [String: [AUParameter]] {
+        guard let params = getCurrentParameters() else { return [:] }
+        
+        var categorized: [String: [AUParameter]] = [:]
+        
+        for param in params {
+            let id = param.identifier.lowercased()
+            let name = param.displayName.lowercased()
+            var category = "Other"
+            
+            if id.contains("osc") || name.contains("oscillator") {
+                category = "Oscillators"
+            } else if id.contains("filter") || name.contains("filter") {
+                category = "Filters"
+            } else if id.contains("env") || name.contains("envelope") {
+                category = "Envelopes"
+            } else if id.contains("lfo") || name.contains("lfo") {
+                category = "LFOs"
+            } else if id.contains("effects") || name.contains("effect") || name.contains("reverb") || name.contains("delay") || name.contains("chorus") {
+                category = "Effects"
+            } else if id.contains("amp") || name.contains("amplitude") || name.contains("volume") || name.contains("gain") {
+                category = "Amplitude"
+            } else if name.contains("modulation") || name.contains("mod") {
+                category = "Modulation"
+            }
+            
+            if categorized[category] == nil {
+                categorized[category] = []
+            }
+            categorized[category]?.append(param)
+        }
+        
+        return categorized
+    }
+    
+    func findParameter(identifier: String? = nil, displayName: String? = nil) -> AUParameter? {
+        guard let params = getCurrentParameters() else { return nil }
+        
+        for param in params {
+            if let id = identifier {
+                if param.identifier.lowercased() == id.lowercased() ||
+                   param.identifier.lowercased().contains(id.lowercased()) {
+                    return param
+                }
+            }
+            if let name = displayName {
+                if param.displayName.lowercased() == name.lowercased() ||
+                   param.displayName.lowercased().contains(name.lowercased()) {
+                    return param
+                }
+            }
+        }
+        return nil
+    }
+    
+    func setParameterValue(identifier: String? = nil, displayName: String? = nil, value: Double) -> Bool {
+        guard let param = findParameter(identifier: identifier, displayName: displayName) else {
+            print("❌ Parameter not found: identifier=\(identifier ?? "nil"), displayName=\(displayName ?? "nil")")
+            return false
+        }
+        
+        let clampedValue = max(param.minValue, min(param.maxValue, AUValue(value)))
+        let oldValue = param.value
+        
+        param.setValue(clampedValue, originator: nil)
+        
+        print("🎛️ Set \(param.displayName): \(oldValue) -> \(clampedValue)")
+        
+        // Track parameter interaction for learn mode
+        midiMapManager.handleParameterInteraction(parameterId: param.identifier, parameterDisplayName: param.displayName, minValue: param.minValue, maxValue: param.maxValue)
+        
+        // Force UI update on main thread
+        DispatchQueue.main.async {
+            if let viewController = self.pluginViewController {
+                viewController.view.setNeedsDisplay(viewController.view.bounds)
+            }
+        }
+        
+        return true
+    }
+    
+    func getFilterCutoff() -> AUParameter? {
+        return findParameter(displayName: "cutoff") ?? findParameter(identifier: "filter_cutoff")
+    }
+    
+    func randomizeParameters(intensity: Double = 0.4, preserveCategories: [String] = [], excludeIds: [String] = []) async throws -> (randomizedCount: Int, intensity: Double) {
+        guard let audioUnit = engineManager.auAudioUnit,
+              let parameterTree = audioUnit.parameterTree else {
+            throw NSError(domain: "PluginHostSession", code: -1, userInfo: [NSLocalizedDescriptionKey: "No plugin loaded or no parameters available"])
+        }
+        
+        let clampedIntensity = max(0.0, min(1.0, intensity))
+        var randomizedCount = 0
+        var changes: [(AUParameter, AUValue)] = []
+        
+        // Collect all parameter changes first
+        for param in parameterTree.allParameters {
+            // Skip if excluded
+            if excludeIds.contains(param.identifier) {
+                continue
+            }
+            
+            // Skip if category should be preserved
+            var shouldPreserve = false
+            for category in preserveCategories {
+                if param.displayName.contains(category) || param.identifier.contains(category.lowercased()) {
+                    shouldPreserve = true
+                    break
+                }
+            }
+            if shouldPreserve {
+                continue
+            }
+            
+            // Intelligent randomization
+            let range = Double(param.maxValue - param.minValue)
+            let currentValue = Double(param.value)
+            
+            // Calculate variation amount
+            let variationAmount: Double
+            if clampedIntensity < 0.5 {
+                variationAmount = range * (0.1 + clampedIntensity * 0.4)
+            } else {
+                variationAmount = range * (0.3 + (clampedIntensity - 0.5) * 1.4)
+            }
+            
+            // Special handling for different parameter types
+            let newValue: Double
+            
+            if param.unit == .hertz && param.displayName.lowercased().contains("cutoff") {
+                // Filter cutoff: logarithmic variation
+                let logMin = log10(max(Double(param.minValue), 1.0))
+                let logMax = log10(Double(param.maxValue))
+                let logCurrent = log10(max(Double(param.minValue), min(Double(param.maxValue), currentValue)))
+                let logVariation = (logMax - logMin) * variationAmount / range
+                let logNew = logCurrent + (Double.random(in: -1...1) * logVariation)
+                newValue = pow(10, max(logMin, min(logMax, logNew)))
+            } else if param.displayName.lowercased().contains("wave") || param.identifier.lowercased().contains("wave") {
+                // Waveform: discrete selection
+                let maxWave = min(Int(param.maxValue), 10)
+                newValue = Double(Int.random(in: 0...maxWave))
+            } else if param.displayName.lowercased().contains("voices") || param.identifier.lowercased().contains("voices") {
+                // Voices: discrete integer
+                let minVoices = max(1, Int(param.minValue))
+                let maxVoices = Int(param.maxValue)
+                newValue = Double(Int.random(in: minVoices...maxVoices))
+            } else if param.displayName.lowercased().contains("envelope") || param.displayName.lowercased().contains("env") {
+                // Envelope times: exponential variation
+                let logMin = log10(max(0.001, Double(param.minValue)))
+                let logMax = log10(Double(param.maxValue))
+                let logCurrent = log10(max(0.001, currentValue))
+                let logVariation = (logMax - logMin) * variationAmount / range
+                let logNew = logCurrent + (Double.random(in: -1...1) * logVariation)
+                newValue = pow(10, max(logMin, min(logMax, logNew)))
+            } else {
+                // Default: vary around current value
+                let offset = Double.random(in: -1...1) * variationAmount
+                newValue = currentValue + offset
+            }
+            
+            // Clamp and store
+            let clampedValue = max(param.minValue, min(param.maxValue, AUValue(newValue)))
+            changes.append((param, clampedValue))
+        }
+        
+        // Apply all changes - batch update for better performance
+        // Use a small delay between changes to allow UI to update
+        for (index, (param, clampedValue)) in changes.enumerated() {
+            let oldValue = param.value
+            
+            // Set the parameter value - this should trigger the plugin to update
+            // Use setValue:originator: to ensure proper notification
+            param.setValue(clampedValue, originator: nil)
+            
+            // Debug: log parameter changes
+            print("🎲 Randomized \(param.displayName): \(oldValue) -> \(clampedValue)")
+            
+            randomizedCount += 1
+            
+            // Small delay to allow UI to update (only for non-instant parameters)
+            if index < changes.count - 1 && param.unit != .boolean && param.unit != .indexed {
+                try? await Task.sleep(nanoseconds: 10_000_000) // 10ms delay
+            }
+        }
+        
+        // Force UI refresh if plugin view controller exists
+        // Some plugins need explicit view updates to reflect parameter changes
+        await MainActor.run {
+            if let viewController = pluginViewController {
+                // Force the view hierarchy to update
+                viewController.view.setNeedsDisplay(viewController.view.bounds)
+                viewController.view.needsLayout = true
+                
+                // Also try updating all subviews - some plugins have nested views
+                @MainActor
+                func updateSubviews(_ view: NSView) {
+                    view.setNeedsDisplay(view.bounds)
+                    view.needsLayout = true
+                    for subview in view.subviews {
+                        updateSubviews(subview)
+                    }
+                }
+                updateSubviews(viewController.view)
+            }
+        }
+        
+        // Also ensure parameter tree notifications are sent
+        if let audioUnit = engineManager.auAudioUnit,
+           let parameterTree = audioUnit.parameterTree {
+            // Trigger a refresh by accessing parameter values
+            // This can help plugins that listen to parameter tree changes
+            for param in parameterTree.allParameters {
+                _ = param.value // Accessing value can trigger observers
+            }
+        }
+        
+        return (randomizedCount, clampedIntensity)
+    }
+    
+    func analyzePatch() async throws -> (summary: String, timbre: (brightness: Double, warmth: Double, roughness: Double, space: Double)) {
+        guard let audioUnit = engineManager.auAudioUnit else {
+            throw NSError(domain: "PluginHostSession", code: -1, userInfo: [NSLocalizedDescriptionKey: "No plugin loaded"])
+        }
+        
+        // Simple analysis based on parameters
+        var filterCutoff: Double = 1000.0
+        var attack: Double = 0.05
+        var decay: Double = 0.2
+        var sustain: Double = 0.7
+        
+        if let parameterTree = audioUnit.parameterTree {
+            for param in parameterTree.allParameters {
+                let name = param.displayName.lowercased()
+                if name.contains("cutoff") {
+                    filterCutoff = Double(param.value)
+                } else if name.contains("attack") {
+                    attack = Double(param.value)
+                } else if name.contains("decay") {
+                    decay = Double(param.value)
+                } else if name.contains("sustain") {
+                    sustain = Double(param.value)
+                }
+            }
+        }
+        
+        let brightness = min(1.0, filterCutoff / 10000.0)
+        let warmth = 0.5 // Could be calculated from resonance
+        let roughness = 0.2 // Could be calculated from detune/unison
+        let space = 0.3 // Could be calculated from stereo width
+        
+        var summary = "Short, snappy bass pluck with a bright transient and controlled low-end."
+        if attack > 0.1 {
+            summary = "Warm pad with gentle attack and smooth decay."
+        } else if filterCutoff < 500 {
+            summary = "Dark, sub-heavy bass with powerful low-end presence."
+        } else if decay > 0.5 && sustain > 0.8 {
+            summary = "Long-sustaining pad with slow decay and high sustain."
+        }
+        
+        return (summary, (brightness, warmth, roughness, space))
     }
 }

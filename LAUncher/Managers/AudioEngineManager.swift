@@ -371,6 +371,8 @@ final class AudioEngineManager: ObservableObject {
         }
         
         // Configure output device 1 (primary stereo output)
+        // AVAudioEngine only supports one output device
+        // We use output1 as primary, output2 is tracked but uses same hardware output
         if let device1 = output1 {
             var propertyAddress = AudioObjectPropertyAddress(
                 mSelector: kAudioHardwarePropertyDefaultOutputDevice,
@@ -398,10 +400,12 @@ final class AudioEngineManager: ObservableObject {
         
         // Note: Output 2 would require a separate audio engine or multi-output setup
         // For now, we track it but use the same output node
+        // In a future implementation, we could create an aggregate device or second engine
         outputNode2 = output2 != nil ? engine.outputNode : nil
         
-        // Reconfigure routing
-        reconfigureRouting()
+        // Don't reconfigure routing - just ensure mixer is connected
+        // This prevents breaking existing connections
+        configureMainMixerConnection()
         
         // Restart if was running
         if wasRunning {

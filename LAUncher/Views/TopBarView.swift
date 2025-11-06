@@ -56,6 +56,22 @@ struct TopBarView: View {
                     }
                     .buttonStyle(.bordered)
                     .help("Export plugin parameters as JSON")
+                    
+                    Button {
+                        session.isShowingMCPTools = true
+                    } label: {
+                        Label("MCP Tools", systemImage: "wand.and.stars")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Open MCP tools for intelligent parameter control")
+                    
+                    Button {
+                        session.isShowingMIDIMap = true
+                    } label: {
+                        Label("MIDI Learn", systemImage: "keyboard")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Map MIDI CC controllers to parameters")
                 }
 
                 engineControls

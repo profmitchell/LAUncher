@@ -26,6 +26,12 @@ struct RootHostView: View {
         .sheet(isPresented: $session.isShowingParameterExport) {
             ParameterExportView(session: session)
         }
+        .sheet(isPresented: $session.isShowingMCPTools) {
+            MCPToolView(session: session)
+        }
+        .sheet(isPresented: $session.isShowingMIDIMap) {
+            MIDIMapView(session: session)
+        }
     }
 
     private var backgroundGradient: LinearGradient {
@@ -51,6 +57,3 @@ struct RootHostView: View {
     }
 }
 
-#Preview {
-    RootHostView()
-}

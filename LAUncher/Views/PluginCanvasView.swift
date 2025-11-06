@@ -76,6 +76,7 @@ private struct PluginEditorContainer: NSViewControllerRepresentable {
     }
 
     func updateNSViewController(_ nsViewController: NSViewController, context: Context) {
-        // AU view controllers handle their own updates.
+        // Don't force layout here - it causes recursion warnings
+        // Plugin view controllers handle their own updates when parameters change
     }
 }
