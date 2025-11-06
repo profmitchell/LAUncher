@@ -3,6 +3,10 @@ import SwiftUI
 struct PluginCanvasView: View {
     @ObservedObject var session: PluginHostSession
     @Environment(\.colorScheme) private var colorScheme
+    
+    private var theme: AppTheme {
+        session.themeManager.currentTheme
+    }
 
     var body: some View {
         ZStack {
@@ -56,23 +60,19 @@ struct PluginCanvasView: View {
     }
 
     private var placeholderFill: Color {
-        colorScheme == .dark
-            ? Color.white.opacity(0.06)
-            : Color.black.opacity(0.05)
+        theme.placeholderFill.color
     }
 
     private var containerBackground: Color {
-        colorScheme == .dark
-            ? Color.white.opacity(0.02)
-            : Color.white.opacity(0.6)
+        theme.containerBackground.color
     }
 
     private var borderColor: Color {
-        colorScheme == .dark ? Color.white.opacity(0.05) : Color.black.opacity(0.08)
+        theme.containerBorder.color
     }
 
     private var controllerBackground: Color {
-        colorScheme == .dark ? Color.black.opacity(0.4) : Color.white
+        theme.canvasBackground.color
     }
 }
 

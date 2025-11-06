@@ -186,25 +186,15 @@ struct RootHostView: View {
     }
 
     private var backgroundGradient: LinearGradient {
-        if colorScheme == .dark {
-            return LinearGradient(
-                colors: [
-                    Color(.displayP3, red: 0.10, green: 0.10, blue: 0.12, opacity: 1),
-                    Color(.displayP3, red: 0.05, green: 0.05, blue: 0.06, opacity: 1)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        } else {
-            return LinearGradient(
-                colors: [
-                    Color(.displayP3, red: 0.92, green: 0.93, blue: 0.96, opacity: 1),
-                    Color(.displayP3, red: 0.86, green: 0.88, blue: 0.92, opacity: 1)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        }
+        let theme = session.themeManager.currentTheme
+        return LinearGradient(
+            colors: [
+                theme.backgroundTop.color,
+                theme.backgroundBottom.color
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
     }
 }
 

@@ -1,94 +1,131 @@
 # LAUncher
 
-A lightweight macOS application for hosting Audio Unit (AU) plugins, supporting both AU 2 and AUv3 formats.
+<div align="center">
 
-## Features
+**A powerful, modern macOS Audio Unit host for both AU 2 and AUv3 plugins**
 
-- **Universal Plugin Support**: Load both AU 2 (traditional) and AUv3 (app extension) plugins
-- **MIDI Input**: Connect MIDI devices or use the built-in musical typing keyboard
-- **Plugin UI**: Native plugin interface embedded directly in the host window
-- **Rescan**: Refresh plugin list to discover newly installed plugins
-- **Real-time Audio**: Low-latency audio processing with AVAudioEngine
+*Built with SwiftUI and AVFoundation*
+
+[![macOS](https://img.shields.io/badge/macOS-15.7+-blue.svg)](https://www.apple.com/macos/)
+[![Swift](https://img.shields.io/badge/Swift-5.0+-orange.svg)](https://swift.org/)
+[![Xcode](https://img.shields.io/badge/Xcode-15.0+-blue.svg)](https://developer.apple.com/xcode/)
+
+</div>
+
+---
+
+## Overview
+
+**LAUncher** is a professional-grade Audio Unit host application designed for macOS. It provides a clean, modern interface for loading and using both traditional AU 2 plugins and modern AUv3 app extensions. Whether you're a music producer, sound designer, or audio enthusiast, LAUncher offers the tools you need to work with your favorite plugins.
+
+### Key Features
+
+- 🎹 **Universal Plugin Support** - Load both AU 2 (traditional) and AUv3 (app extension) plugins seamlessly
+- 🎨 **Customizable Themes** - Choose from built-in themes or create your own custom color schemes
+- ⌨️ **Musical Typing** - Built-in QWERTY keyboard for playing notes without a MIDI controller
+- 🎛️ **MIDI Learn** - Map MIDI CC messages to plugin parameters with intuitive learn mode
+- 🎚️ **Transport Control** - Play/pause transport with accurate BPM sync for tempo-synced effects
+- 📊 **Parameter Export** - Export plugin parameters as JSON for backup and sharing
+- 🤖 **AI Integration** - Built-in MCP (Model Context Protocol) server for AI-powered workflows
+- 🎯 **Low Latency** - Optimized audio engine for real-time performance
+- 🎨 **Modern UI** - Beautiful SwiftUI interface with resizable toolbar and sidebar inspector
+
+---
+
+## Screenshots
+
+*Screenshots coming soon*
+
+---
 
 ## Requirements
 
-- macOS 15.7 or later
-- Xcode 15.0 or later
-- Swift 5.0+
+- **macOS**: 15.7 or later
+- **Xcode**: 15.0 or later
+- **Swift**: 5.0+
+
+---
 
 ## Installation
 
-1. Clone the repository:
-```bash
-git clone <repository-url>
-cd LAUncher
-```
+### Building from Source
 
-2. Open the project in Xcode:
-```bash
-open LAUncher.xcodeproj
-```
+1. **Clone the repository:**
+   ```bash
+   git clone <repository-url>
+   cd LAUncher
+   ```
 
-3. Build and run (⌘R)
+2. **Open the project in Xcode:**
+   ```bash
+   open LAUncher.xcodeproj
+   ```
+
+3. **Build and run:**
+   - Select the "LAUncher" scheme
+   - Choose your Mac as the destination
+   - Press ⌘R to build and run
+
+### Plugin Locations
+
+LAUncher automatically discovers plugins from standard macOS locations:
+
+- `/Library/Audio/Plug-Ins/Components/` (system-wide plugins)
+- `~/Library/Audio/Plug-Ins/Components/` (user-specific plugins)
+
+---
 
 ## Usage
 
-1. Launch LAUncher
-2. Click "Load Plugin…" to browse available plugins
-3. Select a plugin from the list
-4. Use MIDI input or the musical typing keyboard to play
-5. Adjust plugin parameters using the plugin's native UI
+### Getting Started
 
-## Plugin Locations
+1. **Launch LAUncher**
+2. **Load a Plugin** - Click "Load Plugin…" in the toolbar to browse available plugins
+3. **Select a Plugin** - Choose from the list of discovered Audio Units
+4. **Play Notes** - Use MIDI input, musical typing keyboard, or the on-screen keyboard
+5. **Adjust Parameters** - Use the plugin's native UI to tweak settings
+6. **Control Transport** - Use the play/pause button to control BPM-synced effects
 
-LAUncher automatically discovers plugins from:
+### Features Guide
 
-- `/Library/Audio/Plug-Ins/Components/` (system-wide)
-- `~/Library/Audio/Plug-Ins/Components/` (user-specific)
+#### Musical Typing
+Enable musical typing to use your QWERTY keyboard as a MIDI controller. The on-screen keyboard can be toggled on/off and repositioned by dragging.
 
-## Rescanning Plugins
+#### MIDI Learn
+1. Click "MIDI Learn" in the More menu
+2. Click a parameter in the plugin UI
+3. Move a MIDI CC control on your device
+4. The mapping is saved automatically
 
-After installing new plugins:
+#### Themes
+Choose from built-in themes (Dark, Light, Midnight, Sunset, Ocean) or create custom themes. Access themes from the More menu.
 
-1. Click the "Rescan" button in the toolbar
-2. Or click "Load Plugin…" and click "Rescan" if needed
+#### Transport Control
+The transport play/pause button controls tempo synchronization. When playing, plugins like Serum will sync their LFOs and effects to the host BPM.
 
-## Architecture
+#### Inspector Panel
+Toggle the sidebar inspector to access:
+- Audio device selection (Input/Output)
+- MIDI input selection
+- Plugin information
 
-- **AudioEngineManager**: Handles AVAudioEngine setup and plugin instantiation
-- **PluginHostSession**: Manages plugin state and coordination
-- **MidiManager**: MIDI input handling
-- **SwiftUI Views**: Modern, responsive UI built with SwiftUI 6
+---
 
 ## Supported Plugin Types
 
-- Music Device (Instruments)
-- Effects
-- Generators
-- Mixers
-- Panners
-- Format Converters
-- Offline Effects
+LAUncher supports all standard Audio Unit types:
 
-## Troubleshooting
+- **Music Device** (Instruments) - Synthesizers, samplers, drum machines
+- **Effects** - Reverb, delay, distortion, EQ, compression, etc.
+- **Generators** - Tone generators, noise sources
+- **Mixers** - Audio mixing and routing
+- **Panners** - Stereo panning and spatial audio
+- **Format Converters** - Sample rate and format conversion
+- **Offline Effects** - Non-real-time processing
 
-### Plugins Not Loading
+---
 
-If you encounter error -3000 or plugins won't load:
-
-1. Ensure the app has been rebuilt after entitlement changes
-2. Check that plugins are properly installed in the Components directories
-3. Verify plugin compatibility with your macOS version
-4. Try validating plugins using: `auval -a`
-
-### Sandbox Restrictions
-
-This app requires sandboxing to be disabled to load third-party plugins. The entitlements file includes:
-- `com.apple.security.cs.disable-library-validation`
-- `com.apple.security.temporary-exception.audio-unit-host`
-- Additional runtime exceptions for plugin compatibility
-
-## Development
+## Architecture
 
 ### Project Structure
 
@@ -96,38 +133,117 @@ This app requires sandboxing to be disabled to load third-party plugins. The ent
 LAUncher/
 ├── LAUncher/
 │   ├── App/
-│   │   ├── LAUncherApp.swift       # App entry point
-│   │   └── ContentView.swift        # Root content view
+│   │   ├── LAUncherApp.swift          # App entry point
+│   │   └── ContentView.swift           # Root content view
 │   ├── Managers/
-│   │   ├── AudioEngineManager.swift    # Audio engine and plugin loading
-│   │   ├── PluginHostSession.swift     # Plugin state management
-│   │   └── MidiManager.swift           # MIDI input handling
+│   │   ├── AudioEngineManager.swift   # Audio engine and plugin loading
+│   │   ├── PluginHostSession.swift    # Plugin state management
+│   │   ├── MidiManager.swift          # MIDI input handling
+│   │   ├── ThemeManager.swift         # Theme management
+│   │   └── ...
 │   ├── Models/
-│   │   └── MidiTypes.swift             # MIDI data models
+│   │   ├── AppTheme.swift             # Theme definitions
+│   │   └── MidiTypes.swift            # MIDI data models
 │   ├── Views/
-│   │   ├── RootHostView.swift          # Main window view
-│   │   ├── PluginPickerView.swift      # Plugin selection UI
-│   │   ├── PluginCanvasView.swift      # Plugin UI container
-│   │   ├── TopBarView.swift            # Toolbar controls
+│   │   ├── RootHostView.swift         # Main window view
+│   │   ├── PluginPickerView.swift     # Plugin selection UI
+│   │   ├── PluginCanvasView.swift     # Plugin UI container
+│   │   ├── TopBarView.swift           # Toolbar controls
 │   │   ├── StatusBarView.swift         # Status bar display
-│   │   └── MusicalTypingView.swift     # On-screen keyboard
+│   │   └── ...
 │   └── Resources/
-│       ├── Assets.xcassets             # App icons and assets
-│       └── LAUncher.entitlements       # App entitlements
+│       ├── Assets.xcassets            # App icons and assets
+│       └── LAUncher.entitlements      # App entitlements
 └── LAUncher.xcodeproj/
 ```
 
+### Key Components
+
+- **AudioEngineManager**: Handles AVAudioEngine setup, plugin instantiation, and host sync blocks
+- **PluginHostSession**: Coordinates plugin state, MIDI, audio devices, and UI state
+- **ThemeManager**: Manages theme selection and custom theme persistence
+- **MidiManager**: Handles MIDI input from devices and virtual sources
+
+---
+
+## Troubleshooting
+
+### Plugins Not Loading
+
+If you encounter error -3000 or plugins won't load:
+
+1. **Check Entitlements**: Ensure the app has been rebuilt after entitlement changes
+2. **Verify Installation**: Check that plugins are properly installed in the Components directories
+3. **Check Compatibility**: Verify plugin compatibility with your macOS version
+4. **Validate Plugins**: Try validating plugins using: `auval -a`
+
+### Sandbox Restrictions
+
+This app requires specific entitlements to load third-party plugins:
+
+- `com.apple.security.cs.disable-library-validation`
+- `com.apple.security.temporary-exception.audio-unit-host`
+
+These are configured in `LAUncher.entitlements`.
+
+### BPM Sync Issues
+
+If plugins aren't syncing to BPM:
+
+1. Ensure the transport is playing (play button should show pause icon)
+2. Check that the plugin supports host tempo sync
+3. Verify BPM is set correctly in the toolbar
+
+---
+
+## Development
+
 ### Building
 
-1. Select the "LAUncher" scheme
-2. Choose your Mac as the destination
-3. Build (⌘B) or Run (⌘R)
+1. Open `LAUncher.xcodeproj` in Xcode
+2. Select the "LAUncher" scheme
+3. Choose your Mac as the destination
+4. Build (⌘B) or Run (⌘R)
+
+### Code Style
+
+- Follow Swift naming conventions
+- Use `@MainActor` for UI-related code
+- Prefer `ObservableObject` for state management
+- Use SwiftUI best practices for view composition
+
+---
 
 ## License
 
-[Add your license here]
+Copyright © 2024 Mitchell Cohen. All rights reserved.
+
+This software is proprietary and confidential. Unauthorized copying, modification, distribution, or use of this software, via any medium, is strictly prohibited.
+
+---
 
 ## Credits
 
-Built with SwiftUI and AVFoundation for macOS 15+.
+**LAUncher** is developed and maintained by **Mitchell Cohen**.
 
+Built with:
+- SwiftUI for modern, declarative UI
+- AVFoundation for audio processing
+- AudioToolbox for Audio Unit integration
+- CoreAudio for low-level audio control
+
+---
+
+## Acknowledgments
+
+Thanks to the macOS audio development community for their contributions to Audio Unit documentation and best practices.
+
+---
+
+<div align="center">
+
+**LAUncher** - Professional Audio Unit Hosting for macOS
+
+*Made with ❤️ by Mitchell Cohen*
+
+</div>

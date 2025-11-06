@@ -58,9 +58,12 @@ struct TopBarView: View {
 
     private var titleArea: some View {
         HStack(spacing: 8) {
-            Text("Mini AU Host")
+            Text("LAUncher")
                 .font(.headline)
                 .foregroundStyle(.primary)
+            Text("By: Mitchell Cohen")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             if let component = session.currentComponent {
                 Text("• \(component.name)")
                     .foregroundStyle(.secondary)
@@ -109,6 +112,21 @@ struct TopBarView: View {
                     if let c = session.currentComponent { session.setDefaultPlugin(c) }
                 }
                 Button("Clear Default", systemImage: "star.slash") { session.clearDefaultPlugin() }
+            }
+            Divider()
+            Menu("Theme", systemImage: "paintpalette") {
+                ForEach(session.themeManager.availableThemes) { theme in
+                    Button {
+                        session.themeManager.currentTheme = theme
+                    } label: {
+                        HStack {
+                            Text(theme.name)
+                            if session.themeManager.currentTheme.id == theme.id {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
             }
             Divider()
             if session.isMusicalTypingVisible {

@@ -67,6 +67,7 @@ final class PluginHostSession: ObservableObject {
     let audioDeviceManager = AudioDeviceManager()
     let midiMapManager = MIDIMapManager()
     let musicalTypingManager = MusicalTypingManager()
+    let themeManager = ThemeManager()
     private var cancellables: Set<AnyCancellable> = []
     private var mcpServer: MCPServerManager?
     private var parameterChangeMonitor: Task<Void, Never>?

@@ -34,7 +34,7 @@ struct InspectorPanelView: View {
             }
             .padding(12)
         }
-        .background(.ultraThinMaterial)
+        .background(session.themeManager.currentTheme.materialStyle.material)
     }
 
     private var ioView: some View {
