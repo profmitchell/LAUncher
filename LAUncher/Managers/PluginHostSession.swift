@@ -52,18 +52,18 @@ final class PluginHostSession: ObservableObject {
         }
     }
     
-    @Published var selectedOutputLeft: AudioDevice? {
+    @Published var selectedOutput1: AudioDevice? {
         didSet {
-            if selectedOutputLeft != oldValue {
-                try? engineManager.setOutputDevices(left: selectedOutputLeft, right: selectedOutputRight)
+            if selectedOutput1 != oldValue {
+                try? engineManager.setOutputDevices(output1: selectedOutput1, output2: selectedOutput2)
             }
         }
     }
     
-    @Published var selectedOutputRight: AudioDevice? {
+    @Published var selectedOutput2: AudioDevice? {
         didSet {
-            if selectedOutputRight != oldValue {
-                try? engineManager.setOutputDevices(left: selectedOutputLeft, right: selectedOutputRight)
+            if selectedOutput2 != oldValue {
+                try? engineManager.setOutputDevices(output1: selectedOutput1, output2: selectedOutput2)
             }
         }
     }
@@ -90,11 +90,11 @@ final class PluginHostSession: ObservableObject {
         if selectedInputDevice == nil {
             selectedInputDevice = audioDeviceManager.inputDevices.first
         }
-        if selectedOutputLeft == nil {
-            selectedOutputLeft = audioDeviceManager.outputDevices.first
+        if selectedOutput1 == nil {
+            selectedOutput1 = audioDeviceManager.outputDevices.first
         }
-        if selectedOutputRight == nil {
-            selectedOutputRight = audioDeviceManager.outputDevices.first
+        if selectedOutput2 == nil {
+            selectedOutput2 = audioDeviceManager.outputDevices.first
         }
     }
 
