@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import AppKit
 
 struct ChatMessage: Identifiable {
     let id = UUID()
@@ -10,7 +11,7 @@ struct ChatMessage: Identifiable {
 
 struct ChatView: View {
     @ObservedObject var session: PluginHostSession
-    @Environment(\.dismiss) private var dismiss
+    let window: NSWindow
     @State private var messages: [ChatMessage] = []
     @State private var inputText: String = ""
     @State private var isLoading: Bool = false
@@ -36,7 +37,7 @@ struct ChatView: View {
             }
             Spacer()
             Button {
-                dismiss()
+                window.close()
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .imageScale(.large)
@@ -73,7 +74,7 @@ struct ChatView: View {
                 }
                 .padding()
             }
-            .onChange(of: messages.count) { _ in
+            .onChange(of: messages.count) {
                 if let lastMessage = messages.last {
                     withAnimation {
                         proxy.scrollTo(lastMessage.id, anchor: .bottom)

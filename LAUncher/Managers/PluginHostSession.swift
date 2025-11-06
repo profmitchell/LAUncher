@@ -31,6 +31,17 @@ final class PluginHostSession: ObservableObject {
     @Published var isShowingMIDIMap = false
     @Published var isShowingChat = false
     @Published var exportedParameterJSON: String = ""
+    
+    // Parameter analysis cache
+    @Published private(set) var analyzedParameters: ParameterAnalysis?
+    
+    struct ParameterAnalysis {
+        var oscillatorLevelIds: [String] = []
+        var filterCutoffIds: [String] = []
+        var modulationMatrixSlots: [(source: AUParameter?, dest: AUParameter?, amount: AUParameter?)] = []
+        var pluginName: String
+        var pluginType: String // "Vital", "Serum", etc.
+    }
     @Published var selectedMidiSource: MidiSource? {
         didSet {
             if midiManager.selectedSource != selectedMidiSource {
@@ -247,6 +258,11 @@ final class PluginHostSession: ObservableObject {
             }
             
             engineState = .running
+            
+            // Analyze parameters after successful load
+            Task {
+                await analyzeParameters()
+            }
         } catch {
             engineManager.unloadPlugin()
             currentComponent = nil
@@ -282,6 +298,7 @@ final class PluginHostSession: ObservableObject {
         engineManager.unloadPlugin()
         currentComponent = nil
         pluginViewController = nil
+        analyzedParameters = nil
         engineState = .stopped
     }
 
@@ -892,5 +909,107 @@ final class PluginHostSession: ObservableObject {
         }
         
         return response
+    }
+    
+    func analyzeParameters() async {
+        guard let params = getCurrentParameters(), !params.isEmpty else {
+            print("⚠️ No parameters to analyze")
+            return
+        }
+        
+        let pluginName = currentComponent?.name ?? "Unknown"
+        var pluginType = "Unknown"
+        
+        // Detect plugin type
+        if pluginName.lowercased().contains("vital") {
+            pluginType = "Vital"
+        } else if pluginName.lowercased().contains("serum") {
+            pluginType = "Serum"
+        }
+        
+        var analysis = ParameterAnalysis(pluginName: pluginName, pluginType: pluginType)
+        
+        // Find oscillator level parameters
+        for param in params {
+            let name = param.displayName.lowercased()
+            let id = param.identifier.lowercased()
+            
+            // Oscillator levels
+            if (name.contains("oscillator") || name.contains("osc")) && 
+               (name.contains("level") || name.contains("volume") || name.contains("amp")) {
+                analysis.oscillatorLevelIds.append(param.identifier)
+                print("📊 Found oscillator level: \(param.displayName) (id: \(param.identifier))")
+            }
+            
+            // Filter cutoff
+            if name.contains("filter") && name.contains("cutoff") {
+                analysis.filterCutoffIds.append(param.identifier)
+                print("📊 Found filter cutoff: \(param.displayName) (id: \(param.identifier))")
+            }
+            
+            // Modulation matrix (try various patterns)
+            if name.contains("mod") && (name.contains("matrix") || name.contains("modulation")) {
+                if name.contains("source") {
+                    // Try to find corresponding dest and amount
+                    let slotNum = extractSlotNumber(from: name)
+                    let destParam = params.first { p in
+                        let pName = p.displayName.lowercased()
+                        return pName.contains("mod") && (pName.contains("matrix") || pName.contains("modulation")) &&
+                               pName.contains("destination") && extractSlotNumber(from: pName) == slotNum
+                    }
+                    let amountParam = params.first { p in
+                        let pName = p.displayName.lowercased()
+                        return pName.contains("mod") && (pName.contains("matrix") || pName.contains("modulation")) &&
+                               (pName.contains("amount") || pName.contains("depth")) && extractSlotNumber(from: pName) == slotNum
+                    }
+                    
+                    // Ensure array is large enough
+                    while analysis.modulationMatrixSlots.count < slotNum {
+                        analysis.modulationMatrixSlots.append((nil, nil, nil))
+                    }
+                    analysis.modulationMatrixSlots[slotNum - 1] = (param, destParam, amountParam)
+                    print("📊 Found mod matrix slot \(slotNum): source=\(param.displayName)")
+                }
+            }
+        }
+        
+        // Also try Serum-specific patterns
+        if pluginType == "Serum" {
+            // Serum uses different parameter naming
+            for param in params {
+                let name = param.displayName.lowercased()
+                // Serum mod matrix might be named differently
+                if name.contains("matrix") && name.contains("source") {
+                    let slotNum = extractSlotNumber(from: name)
+                    let destParam = params.first { p in
+                        let pName = p.displayName.lowercased()
+                        return pName.contains("matrix") && pName.contains("destination") && extractSlotNumber(from: pName) == slotNum
+                    }
+                    let amountParam = params.first { p in
+                        let pName = p.displayName.lowercased()
+                        return pName.contains("matrix") && (pName.contains("amount") || pName.contains("depth")) && extractSlotNumber(from: pName) == slotNum
+                    }
+                    
+                    if analysis.modulationMatrixSlots.count < slotNum {
+                        analysis.modulationMatrixSlots.append((param, destParam, amountParam))
+                    }
+                }
+            }
+        }
+        
+        await MainActor.run {
+            self.analyzedParameters = analysis
+            print("✅ Parameter analysis complete: \(analysis.oscillatorLevelIds.count) osc levels, \(analysis.filterCutoffIds.count) filters, \(analysis.modulationMatrixSlots.count) mod slots")
+        }
+    }
+    
+    private func extractSlotNumber(from text: String) -> Int {
+        // Try to extract slot number from parameter name
+        let regex = try? NSRegularExpression(pattern: "(\\d+)", options: [])
+        let nsString = text as NSString
+        if let match = regex?.firstMatch(in: text, options: [], range: NSRange(location: 0, length: nsString.length)) {
+            return Int(nsString.substring(with: match.range)) ?? 1
+        }
+        return 1
     }
 }

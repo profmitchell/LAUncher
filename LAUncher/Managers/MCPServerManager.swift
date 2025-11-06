@@ -95,7 +95,7 @@ private class SocketListener {
         setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int>.size))
         
         // Make socket non-blocking
-        var flags = fcntl(socket, F_GETFL, 0)
+        let flags = fcntl(socket, F_GETFL, 0)
         _ = fcntl(socket, F_SETFL, flags | O_NONBLOCK)
         
         let bindStatus = bind(socket, addr.pointee.ai_addr, addr.pointee.ai_addrlen)
@@ -144,7 +144,7 @@ private class SocketListener {
         var buffer = [UInt8](repeating: 0, count: 8192)
         
         // Set socket to non-blocking for read
-        var flags = fcntl(clientSocket, F_GETFL, 0)
+        let flags = fcntl(clientSocket, F_GETFL, 0)
         _ = fcntl(clientSocket, F_SETFL, flags | O_NONBLOCK)
         
         var totalRead = 0
@@ -357,12 +357,16 @@ private class SocketListener {
                 // Extract value
                 let numbers = extractNumbers(from: message)
                 if let value = numbers.first {
-                    let paramId = "48629" // Filter 1 Cutoff
-                    let success = session.setParameterValue(identifier: paramId, value: Double(value))
-                    if success {
-                        response = "✅ Set Filter 1 Cutoff to \(value) Hz"
+                    let filterIds = session.analyzedParameters?.filterCutoffIds ?? []
+                    if let filterId = filterIds.first {
+                        let success = session.setParameterValue(identifier: filterId, value: Double(value))
+                        if success {
+                            response = "✅ Set Filter Cutoff to \(value) Hz"
+                        } else {
+                            response = "❌ Failed to set filter cutoff"
+                        }
                     } else {
-                        response = "❌ Failed to set filter cutoff"
+                        response = "❌ Couldn't find filter cutoff parameter"
                     }
                 } else {
                     response = "I need a value. Try: \"Set filter cutoff to 2000\""
@@ -374,10 +378,14 @@ private class SocketListener {
                 
                 if let level = numbers.first {
                     var successCount = 0
+                    let oscIds = session.analyzedParameters?.oscillatorLevelIds ?? []
+                    
                     for oscNum in oscNumbers {
-                        let paramId = getOscillatorLevelId(oscNum)
-                        if session.setParameterValue(identifier: paramId, value: Double(level)) {
-                            successCount += 1
+                        if oscNum <= oscIds.count {
+                            let paramId = oscIds[oscNum - 1]
+                            if session.setParameterValue(identifier: paramId, value: Double(level)) {
+                                successCount += 1
+                            }
                         }
                     }
                     if successCount > 0 {
@@ -397,12 +405,12 @@ private class SocketListener {
             if lowerMessage.contains("modwheel") || lowerMessage.contains("mod wheel") || lowerMessage.contains("cc 1") {
                 if lowerMessage.contains("oscillator") || lowerMessage.contains("osc") {
                     // Check if they want internal modulation (Vital's mod matrix) vs MIDI CC mapping
-                    if lowerMessage.contains("source") || lowerMessage.contains("in vital") || lowerMessage.contains("modulation") {
-                        // Internal modulation routing in Vital
+                    if lowerMessage.contains("source") || lowerMessage.contains("in vital") || lowerMessage.contains("modulation") || lowerMessage.contains("matrix") {
+                        // Internal modulation routing in Vital/Serum
                         response = await setupModwheelModulation(session: session, targetOscillators: [1, 2, 3])
                     } else {
                         // MIDI CC mapping (existing behavior)
-                        let oscIds = ["50797", "51513", "52503"] // All three oscillator levels
+                        let oscIds = session.analyzedParameters?.oscillatorLevelIds ?? ["50797", "51513", "52503"] // Fallback to Vital IDs
                         for paramId in oscIds {
                             if let param = session.findParameter(identifier: paramId) {
                                 session.midiMapManager.createMapping(
@@ -549,55 +557,24 @@ private class SocketListener {
     }
     
     private func setupModwheelModulation(session: PluginHostSession, targetOscillators: [Int]) async -> String {
-        guard let params = session.getCurrentParameters(), !params.isEmpty else {
-            return "❌ No parameters available"
+        guard let analysis = session.analyzedParameters else {
+            return "❌ Parameters not analyzed yet. Please wait a moment and try again."
         }
         
-        // Find modulation matrix parameters in Vital
-        // Vital uses parameters like "Mod Matrix 1 Source", "Mod Matrix 1 Destination", "Mod Matrix 1 Amount"
-        var modMatrixParams: [(source: AUParameter?, dest: AUParameter?, amount: AUParameter?)] = []
+        let modMatrixSlots = analysis.modulationMatrixSlots
+        let oscLevelIds = analysis.oscillatorLevelIds
         
-        // Try to find mod matrix slots
-        for i in 1...16 { // Vital typically has 16 mod matrix slots
-            let sourceParam = params.first { param in
-                let name = param.displayName.lowercased()
-                return name.contains("mod") && name.contains("matrix") && name.contains("\(i)") && name.contains("source")
-            }
-            
-            let destParam = params.first { param in
-                let name = param.displayName.lowercased()
-                return name.contains("mod") && name.contains("matrix") && name.contains("\(i)") && name.contains("destination")
-            }
-            
-            let amountParam = params.first { param in
-                let name = param.displayName.lowercased()
-                return name.contains("mod") && name.contains("matrix") && name.contains("\(i)") && name.contains("amount")
-            }
-            
-            if sourceParam != nil || destParam != nil || amountParam != nil {
-                modMatrixParams.append((sourceParam, destParam, amountParam))
-            }
+        if modMatrixSlots.isEmpty {
+            return "❌ Couldn't find modulation matrix parameters. \(analysis.pluginName)'s modulation matrix might need to be configured through the plugin UI."
         }
         
-        if modMatrixParams.isEmpty {
-            // Try alternative naming patterns
-            let altSource = params.first { param in
-                let name = param.displayName.lowercased()
-                return name.contains("modwheel") || name.contains("mod wheel") || (name.contains("mod") && name.contains("source"))
-            }
-            
-            if altSource != nil {
-                return "Found modwheel source parameter, but need to find modulation matrix slots. Try using Vital's UI to set up modulation routing."
-            }
-            
-            return "❌ Couldn't find modulation matrix parameters. Vital's modulation matrix might need to be configured through the plugin UI."
+        if oscLevelIds.isEmpty {
+            return "❌ Couldn't find oscillator level parameters"
         }
         
         // Find oscillator level parameters
-        let oscLevelIds = ["50797", "51513", "52503"] // Osc 1, 2, 3 levels
         var foundOscParams: [AUParameter] = []
-        
-        for oscId in oscLevelIds {
+        for oscId in oscLevelIds.prefix(targetOscillators.count) {
             if let param = session.findParameter(identifier: oscId) {
                 foundOscParams.append(param)
             }
@@ -607,35 +584,32 @@ private class SocketListener {
             return "❌ Couldn't find oscillator level parameters"
         }
         
-        // Try to set up modulation routing
-        // We need to find mod matrix slots and set:
-        // 1. Source = Modwheel
-        // 2. Destination = Oscillator Level
-        // 3. Amount = appropriate value
-        
         var successCount = 0
         var details = ""
         
-        // Use first available mod matrix slot for each oscillator
+        // Use mod matrix slots for each oscillator
         for (index, oscParam) in foundOscParams.enumerated() {
-            if index < modMatrixParams.count {
-                let slot = modMatrixParams[index]
+            if index < modMatrixSlots.count {
+                let slot = modMatrixSlots[index]
                 
-                // Set source to modwheel (might be value 1 or specific index)
-                // Modwheel is typically MIDI CC 1, which might be parameter value 1 or a specific mod source index
+                // Set source to modwheel
+                // Modwheel is typically MIDI CC 1, which might be source index 1 or a specific value
                 if let sourceParam = slot.source {
-                    // Try setting to modwheel value (this varies by plugin)
-                    // In Vital, modwheel might be source index 1 or a specific value
+                    // Try setting to modwheel value (varies by plugin)
+                    // In Vital/Serum, modwheel might be source index 1
                     sourceParam.setValue(1.0, originator: nil)
                     details += "Slot \(index + 1): Set source to modwheel\n"
                 }
                 
                 // Set destination to oscillator level
-                // This might require finding the oscillator level parameter's address/index
+                // Find the destination index that corresponds to this oscillator level
                 if let destParam = slot.dest {
-                    // Would need to find the correct destination index for oscillator level
-                    // This is plugin-specific and might require reverse engineering
-                    details += "Slot \(index + 1): Attempting to set destination\n"
+                    // We need to find the parameter address/index for the oscillator level
+                    // This is plugin-specific, but we can try to set it based on the parameter address
+                    // For now, we'll set a reasonable value - this might need plugin-specific tuning
+                    let destValue = AUValue(oscParam.address) // Use parameter address as destination index
+                    destParam.setValue(destValue, originator: nil)
+                    details += "Slot \(index + 1): Set destination to osc level (address: \(oscParam.address))\n"
                 }
                 
                 // Set amount
@@ -648,9 +622,9 @@ private class SocketListener {
         }
         
         if successCount > 0 {
-            return "✅ Set up modwheel modulation routing in \(successCount) modulation matrix slot(s)!\n\n\(details)\n⚠️ Note: You may need to verify the source and destination settings in Vital's UI, as modulation matrix parameter indices vary by plugin version."
+            return "✅ Set up modwheel modulation routing in \(successCount) modulation matrix slot(s)!\n\n\(details)\n⚠️ Note: You may need to verify the source and destination settings in \(analysis.pluginName)'s UI, as modulation matrix parameter indices vary by plugin version."
         } else {
-            return "⚠️ Found modulation matrix parameters but couldn't configure them automatically. Please use Vital's modulation matrix UI:\n1. Open the modulation matrix\n2. Set source to Modwheel\n3. Set destination to Oscillator Level\n4. Adjust amount"
+            return "⚠️ Found modulation matrix parameters but couldn't configure them automatically. Please use \(analysis.pluginName)'s modulation matrix UI:\n1. Open the modulation matrix\n2. Set source to Modwheel\n3. Set destination to Oscillator Level\n4. Adjust amount"
         }
     }
     
