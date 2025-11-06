@@ -58,6 +58,7 @@ final class PluginHostSession: ObservableObject {
     let midiManager = MidiManager()
     let audioDeviceManager = AudioDeviceManager()
     let midiMapManager = MIDIMapManager()
+    let musicalTypingManager = MusicalTypingManager()
     private var cancellables: Set<AnyCancellable> = []
     private var mcpServer: MCPServerManager?
     private var parameterChangeMonitor: Task<Void, Never>?
@@ -97,6 +98,24 @@ final class PluginHostSession: ObservableObject {
                 try? server.start()
             }
         }
+        // Wire musical typing to send virtual notes
+        musicalTypingManager.sendNoteOn = { [weak self] note, velocity in
+            Task { @MainActor in self?.sendVirtualNoteOn(noteNumber: note, velocity: velocity) }
+        }
+        musicalTypingManager.sendNoteOff = { [weak self] note in
+            Task { @MainActor in self?.sendVirtualNoteOff(noteNumber: note) }
+        }
+
+        // Attempt to auto-load default plugin after a short delay to ensure lists populated
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            await self.loadDefaultPluginIfAvailable()
+        }
+    }
+
+    // MARK: - Master Gain
+    @Published var masterGain: Float = 0.8 {
+        didSet { engineManager.setMasterGain(masterGain) }
     }
 
     @Published var selectedInputDevice: AudioDevice? {
@@ -311,6 +330,52 @@ final class PluginHostSession: ObservableObject {
         isMonitoringParameterChanges = false
         lastParameterValues.removeAll()
         engineState = .stopped
+    }
+
+    // MARK: - Default Plugin Persistence
+    private let defaults = UserDefaults.standard
+    private let defaultTypeKey = "DefaultPluginType"
+    private let defaultSubTypeKey = "DefaultPluginSubType"
+    private let defaultManuKey = "DefaultPluginManufacturer"
+    private let defaultNameKey = "DefaultPluginName"
+
+    func setDefaultPlugin(_ component: AVAudioUnitComponent) {
+        let desc = component.audioComponentDescription
+        defaults.set(Int(desc.componentType), forKey: defaultTypeKey)
+        defaults.set(Int(desc.componentSubType), forKey: defaultSubTypeKey)
+        defaults.set(Int(desc.componentManufacturer), forKey: defaultManuKey)
+        defaults.set(component.name, forKey: defaultNameKey)
+    }
+
+    func clearDefaultPlugin() {
+        defaults.removeObject(forKey: defaultTypeKey)
+        defaults.removeObject(forKey: defaultSubTypeKey)
+        defaults.removeObject(forKey: defaultManuKey)
+        defaults.removeObject(forKey: defaultNameKey)
+    }
+
+    func loadDefaultPluginIfAvailable() async {
+        let type = defaults.integer(forKey: defaultTypeKey)
+        let sub = defaults.integer(forKey: defaultSubTypeKey)
+        let manu = defaults.integer(forKey: defaultManuKey)
+        guard type != 0 || sub != 0 || manu != 0 else { return }
+
+        let target = AudioComponentDescription(
+            componentType: OSType(type),
+            componentSubType: OSType(sub),
+            componentManufacturer: OSType(manu),
+            componentFlags: 0,
+            componentFlagsMask: 0
+        )
+
+        if let matched = availablePlugins.first(where: { comp in
+            let d = comp.audioComponentDescription
+            return d.componentType == target.componentType &&
+                   d.componentSubType == target.componentSubType &&
+                   d.componentManufacturer == target.componentManufacturer
+        }) {
+            await load(component: matched)
+        }
     }
 
     func toggleEngineRunning() {

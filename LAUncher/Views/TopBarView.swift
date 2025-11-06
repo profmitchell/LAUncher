@@ -93,6 +93,21 @@ struct TopBarView: View {
                 }
                 .buttonStyle(.bordered)
 
+                // Default plugin management
+                Menu {
+                    Button("Set as Default") {
+                        if let component = session.currentComponent {
+                            session.setDefaultPlugin(component)
+                        }
+                    }
+                    Button("Clear Default") {
+                        session.clearDefaultPlugin()
+                    }
+                } label: {
+                    Label("Default", systemImage: "star")
+                }
+                .buttonStyle(.bordered)
+
                 Button {
                     session.exportParametersAsJSON()
                 } label: {

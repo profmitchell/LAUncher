@@ -24,6 +24,22 @@ struct StatusBarView: View {
             }
 
             Spacer()
+
+            // Master Gain
+            HStack(spacing: 8) {
+                Image(systemName: "speaker.wave.2.fill")
+                    .foregroundStyle(.secondary)
+                Slider(value: Binding(get: {
+                    Double(session.masterGain)
+                }, set: { newVal in
+                    session.masterGain = Float(newVal)
+                }), in: 0...1)
+                    .frame(width: 140)
+                Text(masterGainDb)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 48, alignment: .trailing)
+            }
         }
         .padding(12)
         .background(statusBackground)
@@ -76,5 +92,11 @@ struct StatusBarView: View {
         guard duration > 0 else { return "–" }
         let milliseconds = duration * 1000
         return String(format: "%.2f ms", milliseconds)
+    }
+
+    private var masterGainDb: String {
+        let linear = max(0.000_1, Double(session.masterGain))
+        let db = 20.0 * log10(linear)
+        return String(format: "%0.1f dB", db)
     }
 }

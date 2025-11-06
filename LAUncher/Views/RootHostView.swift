@@ -28,6 +28,12 @@ struct RootHostView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .padding(.bottom, 12)
             }
+
+            // Invisible key capture layer to turn QWERTY into MIDI when enabled
+            if session.isMusicalTypingEnabled {
+                MusicalTypingKeyCaptureView(manager: session.musicalTypingManager, enabled: true)
+                    .frame(width: 0, height: 0)
+            }
         }
         .frame(minWidth: 960, minHeight: 600)
         .sheet(isPresented: $session.isShowingPluginPicker) {

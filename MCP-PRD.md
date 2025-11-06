@@ -223,4 +223,4 @@ IMPLEMENTATION NOTES
     - POST http://127.0.0.1:5555/library
 - The MCP server must:
   - Respond to "tools/list" with metadata for all tools above.
-  - Respond to "tools/call" by parsing "toolName" and "arguments" and returning the appropriate JSON result.
+  - Respond to "tools/call" by parsing "toolName" and "arguments" and returning the appropriate JSON result.zzz

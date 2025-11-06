@@ -17,10 +17,12 @@ final class AudioEngineManager: ObservableObject {
 
     @Published private(set) var isRunning = false
     @Published private(set) var lastError: Error?
+    @Published private(set) var masterGain: Float = 0.8
 
     init() {
         configureMainMixerConnection()
         engine.prepare()
+        engine.mainMixerNode.outputVolume = masterGain
     }
 
     var auAudioUnit: AUAudioUnit? {
@@ -60,6 +62,12 @@ final class AudioEngineManager: ObservableObject {
 
         engine.stop()
         isRunning = false
+    }
+
+    func setMasterGain(_ value: Float) {
+        let clamped = max(0.0, min(1.0, value))
+        masterGain = clamped
+        engine.mainMixerNode.outputVolume = clamped
     }
 
     func unloadPlugin() {
