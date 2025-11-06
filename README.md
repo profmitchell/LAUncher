@@ -37,30 +37,66 @@
 <div align="center">
 
 ### Main Interface
+<details>
+<summary>📸 Click to expand full size</summary>
+
 ![LAUncher Main Interface](docs/screenshots/launcher1.png)
 
+</details>
+<a href="docs/screenshots/launcher1.png"><img src="docs/screenshots/launcher1.png" alt="LAUncher Main Interface" width="500"/></a>
+
 ### Plugin View
+<details>
+<summary>📸 Click to expand full size</summary>
+
 ![LAUncher Plugin View](docs/screenshots/launcher2.png)
 
-### MIDI Learn & Mapping
-![MIDI Learn Dialog](docs/screenshots/Screenshot%202025-11-06%20at%2011.59.55%20AM.png)
+</details>
+<a href="docs/screenshots/launcher2.png"><img src="docs/screenshots/launcher2.png" alt="LAUncher Plugin View" width="500"/></a>
 
-### Inspector Panel  
-![Inspector Panel](docs/screenshots/Screenshot%202025-11-06%20at%2012.00.20%20PM.png)
+### MIDI Learn & Mapping
+<details>
+<summary>📸 Click to expand full size</summary>
+
+![MIDI Learn Dialog](docs/screenshots/midi-learn.png)
+
+</details>
+<a href="docs/screenshots/midi-learn.png"><img src="docs/screenshots/midi-learn.png" alt="MIDI Learn Dialog" width="500"/></a>
+
+### Inspector Panel
+<details>
+<summary>📸 Click to expand full size</summary>
+
+![Inspector Panel](docs/screenshots/inspector-panel.png)
+
+</details>
+<a href="docs/screenshots/inspector-panel.png"><img src="docs/screenshots/inspector-panel.png" alt="Inspector Panel" width="500"/></a>
 
 ### Theme Selection
-![Theme Selection](docs/screenshots/Screenshot%202025-11-06%20at%2012.00.33%20PM.png)
+<details>
+<summary>📸 Click to expand full size</summary>
+
+![Theme Selection](docs/screenshots/theme-selection.png)
+
+</details>
+<a href="docs/screenshots/theme-selection.png"><img src="docs/screenshots/theme-selection.png" alt="Theme Selection" width="500"/></a>
 
 ### QWERTY Piano
-![QWERTY Piano](docs/screenshots/Screenshot%202025-11-06%20at%2012.00.56%20PM.png)
+<details>
+<summary>📸 Click to expand full size</summary>
+
+![QWERTY Piano](docs/screenshots/qwerty-piano.png)
+
+</details>
+<a href="docs/screenshots/qwerty-piano.png"><img src="docs/screenshots/qwerty-piano.png" alt="QWERTY Piano" width="500"/></a>
 
 </div>
 
 ### Video Demo
 
-https://github.com/user-attachments/assets/AUMCPsmallsquare.mp4
+**[🎥 Watch Demo Video on Screen Studio](https://screen.studio/share/FXBl0src)**
 
-*Demo video showing LAUncher in action*
+*Recorded and shared using Screen Studio*
 
 ---
 
