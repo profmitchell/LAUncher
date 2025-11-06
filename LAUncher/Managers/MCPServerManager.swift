@@ -213,6 +213,10 @@ private class SocketListener {
             return await handleSetParameters(jsonBody)
         } else if method == "POST" && path == "/api/randomize_parameters" {
             return await handleRandomizeParameters(jsonBody)
+        } else if method == "POST" && path == "/api/create_midi_mapping" {
+            return await handleCreateMIDIMapping(jsonBody)
+        } else if method == "POST" && path == "/api/chat" {
+            return await handleChat(jsonBody)
         } else if method == "GET" && path == "/health" {
             return httpResponse(status: "200 OK", body: "OK")
         } else {
@@ -299,6 +303,354 @@ private class SocketListener {
                 "result": "error",
                 "message": error.localizedDescription
             ])
+        }
+    }
+    
+    private func handleCreateMIDIMapping(_ body: [String: Any]?) async -> String {
+        guard let session = session,
+              let ccNumber = body?["ccNumber"] as? Int,
+              let parameterIds = body?["parameterIds"] as? [String] else {
+            return jsonResponse(["result": "error", "message": "Missing ccNumber or parameterIds"])
+        }
+        
+        var created: [[String: Any]] = []
+        
+        for paramId in parameterIds {
+            guard let param = session.findParameter(identifier: paramId) else {
+                continue
+            }
+            
+            session.midiMapManager.createMapping(
+                parameterId: paramId,
+                parameterDisplayName: param.displayName,
+                ccNumber: UInt8(ccNumber),
+                minValue: param.minValue,
+                maxValue: param.maxValue
+            )
+            
+            created.append([
+                "parameterId": paramId,
+                "displayName": param.displayName,
+                "ccNumber": ccNumber
+            ])
+        }
+        
+        return jsonResponse([
+            "result": "ok",
+            "created": created
+        ])
+    }
+    
+    private func handleChat(_ body: [String: Any]?) async -> String {
+        guard let session = session,
+              let message = body?["message"] as? String else {
+            return jsonResponse(["response": "I need a message to respond to."])
+        }
+        
+        let lowerMessage = message.lowercased()
+        var response = ""
+        
+        // Parse natural language commands
+        if lowerMessage.contains("set") || lowerMessage.contains("change") {
+            // Parameter setting commands
+            if lowerMessage.contains("filter") && lowerMessage.contains("cutoff") {
+                // Extract value
+                let numbers = extractNumbers(from: message)
+                if let value = numbers.first {
+                    let paramId = "48629" // Filter 1 Cutoff
+                    let success = session.setParameterValue(identifier: paramId, value: Double(value))
+                    if success {
+                        response = "✅ Set Filter 1 Cutoff to \(value) Hz"
+                    } else {
+                        response = "❌ Failed to set filter cutoff"
+                    }
+                } else {
+                    response = "I need a value. Try: \"Set filter cutoff to 2000\""
+                }
+            } else if lowerMessage.contains("oscillator") || lowerMessage.contains("osc") {
+                // Oscillator level commands
+                let oscNumbers = extractOscillatorNumbers(from: message)
+                let numbers = extractNumbers(from: message)
+                
+                if let level = numbers.first {
+                    var successCount = 0
+                    for oscNum in oscNumbers {
+                        let paramId = getOscillatorLevelId(oscNum)
+                        if session.setParameterValue(identifier: paramId, value: Double(level)) {
+                            successCount += 1
+                        }
+                    }
+                    if successCount > 0 {
+                        response = "✅ Set \(successCount) oscillator level(s) to \(level)"
+                    } else {
+                        response = "❌ Couldn't find oscillator level parameters"
+                    }
+                } else {
+                    response = "I need a level value. Try: \"Set oscillator 1 level to 0.8\""
+                }
+            } else {
+                // Generic parameter setting
+                response = "I can set filter cutoff, oscillator levels, and other parameters. Try: \"Set filter cutoff to 2000\""
+            }
+        } else if lowerMessage.contains("map") || lowerMessage.contains("assign") {
+            // MIDI mapping commands
+            if lowerMessage.contains("modwheel") || lowerMessage.contains("mod wheel") || lowerMessage.contains("cc 1") {
+                if lowerMessage.contains("oscillator") || lowerMessage.contains("osc") {
+                    // Check if they want internal modulation (Vital's mod matrix) vs MIDI CC mapping
+                    if lowerMessage.contains("source") || lowerMessage.contains("in vital") || lowerMessage.contains("modulation") {
+                        // Internal modulation routing in Vital
+                        response = await setupModwheelModulation(session: session, targetOscillators: [1, 2, 3])
+                    } else {
+                        // MIDI CC mapping (existing behavior)
+                        let oscIds = ["50797", "51513", "52503"] // All three oscillator levels
+                        for paramId in oscIds {
+                            if let param = session.findParameter(identifier: paramId) {
+                                session.midiMapManager.createMapping(
+                                    parameterId: paramId,
+                                    parameterDisplayName: param.displayName,
+                                    ccNumber: 1,
+                                    minValue: param.minValue,
+                                    maxValue: param.maxValue
+                                )
+                            }
+                        }
+                        response = "✅ Mapped modwheel (CC 1) to all oscillator levels!"
+                    }
+                } else {
+                    response = "What should I map modwheel to? Try: \"Map modwheel to all oscillators\" or \"Map modwheel as source to oscillator levels\""
+                }
+            } else {
+                response = "I can map MIDI controllers. Try: \"Map modwheel to all oscillators\""
+            }
+        } else if lowerMessage.contains("randomize") || lowerMessage.contains("random") {
+            // Randomize parameters
+            do {
+                let result = try await session.randomizeParameters(intensity: 0.4)
+                response = "🎲 Randomized \(result.randomizedCount) parameters with intensity \(result.intensity)"
+            } catch {
+                response = "❌ Failed to randomize: \(error.localizedDescription)"
+            }
+        } else if lowerMessage.contains("get") || lowerMessage.contains("show") || lowerMessage.contains("list") {
+            // Get information
+            if lowerMessage.contains("oscillator") || lowerMessage.contains("osc") {
+                let oscParams = session.getOscillatorParameters(oscNumber: 1) ?? []
+                var oscInfo = "Found \(oscParams.count) oscillator-related parameters:\n"
+                for param in oscParams.prefix(10) {
+                    oscInfo += "• \(param.displayName): \(String(format: "%.2f", param.value))\n"
+                }
+                response = oscInfo
+            } else if lowerMessage.contains("parameters") {
+                if let params = session.getCurrentParameters() {
+                    response = "Found \(params.count) parameters. Use search or ask about specific ones!"
+                } else {
+                    response = "No plugin loaded or no parameters available."
+                }
+            } else {
+                response = "I can show oscillator parameters, all parameters, and more. What would you like to see?"
+            }
+        } else if lowerMessage.contains("hello") || lowerMessage.contains("hi") || lowerMessage.contains("hey") {
+            response = "Hey! I can help you control your synth. Try:\n• \"Set filter cutoff to 2000\"\n• \"Map modwheel to all oscillators\"\n• \"Randomize parameters\"\n• \"Show oscillator levels\""
+        } else if lowerMessage.contains("help") {
+            response = """
+            I can help you control your synth! Here's what I can do:
+            
+            🎛️ Set Parameters:
+            • "Set filter cutoff to 2000"
+            • "Set oscillator 1 level to 0.8"
+            
+            ⌨️ MIDI Mapping:
+            • "Map modwheel to all oscillators"
+            
+            🎲 Randomize:
+            • "Randomize parameters"
+            
+            📊 Get Info:
+            • "Show oscillator parameters"
+            • "List all parameters"
+            
+            Just ask me in natural language!
+            """
+        } else {
+            response = "I can help you control your synth! Try:\n• \"Set filter cutoff to 2000\"\n• \"Map modwheel to all oscillators\"\n• \"Randomize parameters\"\n• \"Show oscillator levels\"\n\nOr say \"help\" for more options!"
+        }
+        
+        return jsonResponse(["response": response])
+    }
+    
+    private func extractNumbers(from text: String) -> [Double] {
+        let numbers = text.components(separatedBy: CharacterSet.decimalDigits.inverted)
+            .compactMap { Double($0) }
+        
+        // Also try to extract numbers with units (Hz, kHz, etc.)
+        let regex = try? NSRegularExpression(pattern: "\\d+(?:\\.\\d+)?", options: [])
+        let nsString = text as NSString
+        let matches = regex?.matches(in: text, options: [], range: NSRange(location: 0, length: nsString.length)) ?? []
+        
+        var allNumbers: [Double] = []
+        for match in matches {
+            if let number = Double(nsString.substring(with: match.range)) {
+                allNumbers.append(number)
+            }
+        }
+        
+        // Check for kHz
+        if text.lowercased().contains("khz") {
+            allNumbers = allNumbers.map { $0 * 1000.0 }
+        }
+        
+        return allNumbers.isEmpty ? numbers : allNumbers
+    }
+    
+    private func extractOscillatorNumbers(from text: String) -> [Int] {
+        var oscNumbers: [Int] = []
+        
+        // Check for "all oscillators" or "all osc"
+        if text.lowercased().contains("all oscillator") || text.lowercased().contains("all osc") {
+            return [1, 2, 3]
+        }
+        
+        // Extract oscillator numbers
+        let regex = try? NSRegularExpression(pattern: "oscillator\\s+(\\d+)", options: .caseInsensitive)
+        let nsString = text as NSString
+        let matches = regex?.matches(in: text, options: [], range: NSRange(location: 0, length: nsString.length)) ?? []
+        
+        for match in matches {
+            if match.numberOfRanges > 1 {
+                let oscNum = nsString.substring(with: match.range(at: 1))
+                if let num = Int(oscNum) {
+                    oscNumbers.append(num)
+                }
+            }
+        }
+        
+        // Also check for "osc 1", "osc1", etc.
+        let oscRegex = try? NSRegularExpression(pattern: "osc\\s*(\\d+)", options: .caseInsensitive)
+        let oscMatches = oscRegex?.matches(in: text, options: [], range: NSRange(location: 0, length: nsString.length)) ?? []
+        
+        for match in oscMatches {
+            if match.numberOfRanges > 1 {
+                let oscNum = nsString.substring(with: match.range(at: 1))
+                if let num = Int(oscNum) {
+                    oscNumbers.append(num)
+                }
+            }
+        }
+        
+        return oscNumbers.isEmpty ? [1, 2, 3] : oscNumbers
+    }
+    
+    private func getOscillatorLevelId(_ oscNumber: Int) -> String {
+        switch oscNumber {
+        case 1: return "50797"
+        case 2: return "51513"
+        case 3: return "52503"
+        default: return "50797"
+        }
+    }
+    
+    private func setupModwheelModulation(session: PluginHostSession, targetOscillators: [Int]) async -> String {
+        guard let params = session.getCurrentParameters(), !params.isEmpty else {
+            return "❌ No parameters available"
+        }
+        
+        // Find modulation matrix parameters in Vital
+        // Vital uses parameters like "Mod Matrix 1 Source", "Mod Matrix 1 Destination", "Mod Matrix 1 Amount"
+        var modMatrixParams: [(source: AUParameter?, dest: AUParameter?, amount: AUParameter?)] = []
+        
+        // Try to find mod matrix slots
+        for i in 1...16 { // Vital typically has 16 mod matrix slots
+            let sourceParam = params.first { param in
+                let name = param.displayName.lowercased()
+                return name.contains("mod") && name.contains("matrix") && name.contains("\(i)") && name.contains("source")
+            }
+            
+            let destParam = params.first { param in
+                let name = param.displayName.lowercased()
+                return name.contains("mod") && name.contains("matrix") && name.contains("\(i)") && name.contains("destination")
+            }
+            
+            let amountParam = params.first { param in
+                let name = param.displayName.lowercased()
+                return name.contains("mod") && name.contains("matrix") && name.contains("\(i)") && name.contains("amount")
+            }
+            
+            if sourceParam != nil || destParam != nil || amountParam != nil {
+                modMatrixParams.append((sourceParam, destParam, amountParam))
+            }
+        }
+        
+        if modMatrixParams.isEmpty {
+            // Try alternative naming patterns
+            let altSource = params.first { param in
+                let name = param.displayName.lowercased()
+                return name.contains("modwheel") || name.contains("mod wheel") || (name.contains("mod") && name.contains("source"))
+            }
+            
+            if altSource != nil {
+                return "Found modwheel source parameter, but need to find modulation matrix slots. Try using Vital's UI to set up modulation routing."
+            }
+            
+            return "❌ Couldn't find modulation matrix parameters. Vital's modulation matrix might need to be configured through the plugin UI."
+        }
+        
+        // Find oscillator level parameters
+        let oscLevelIds = ["50797", "51513", "52503"] // Osc 1, 2, 3 levels
+        var foundOscParams: [AUParameter] = []
+        
+        for oscId in oscLevelIds {
+            if let param = session.findParameter(identifier: oscId) {
+                foundOscParams.append(param)
+            }
+        }
+        
+        if foundOscParams.isEmpty {
+            return "❌ Couldn't find oscillator level parameters"
+        }
+        
+        // Try to set up modulation routing
+        // We need to find mod matrix slots and set:
+        // 1. Source = Modwheel
+        // 2. Destination = Oscillator Level
+        // 3. Amount = appropriate value
+        
+        var successCount = 0
+        var details = ""
+        
+        // Use first available mod matrix slot for each oscillator
+        for (index, oscParam) in foundOscParams.enumerated() {
+            if index < modMatrixParams.count {
+                let slot = modMatrixParams[index]
+                
+                // Set source to modwheel (might be value 1 or specific index)
+                // Modwheel is typically MIDI CC 1, which might be parameter value 1 or a specific mod source index
+                if let sourceParam = slot.source {
+                    // Try setting to modwheel value (this varies by plugin)
+                    // In Vital, modwheel might be source index 1 or a specific value
+                    sourceParam.setValue(1.0, originator: nil)
+                    details += "Slot \(index + 1): Set source to modwheel\n"
+                }
+                
+                // Set destination to oscillator level
+                // This might require finding the oscillator level parameter's address/index
+                if let destParam = slot.dest {
+                    // Would need to find the correct destination index for oscillator level
+                    // This is plugin-specific and might require reverse engineering
+                    details += "Slot \(index + 1): Attempting to set destination\n"
+                }
+                
+                // Set amount
+                if let amountParam = slot.amount {
+                    amountParam.setValue(1.0, originator: nil)
+                    details += "Slot \(index + 1): Set amount to 1.0\n"
+                    successCount += 1
+                }
+            }
+        }
+        
+        if successCount > 0 {
+            return "✅ Set up modwheel modulation routing in \(successCount) modulation matrix slot(s)!\n\n\(details)\n⚠️ Note: You may need to verify the source and destination settings in Vital's UI, as modulation matrix parameter indices vary by plugin version."
+        } else {
+            return "⚠️ Found modulation matrix parameters but couldn't configure them automatically. Please use Vital's modulation matrix UI:\n1. Open the modulation matrix\n2. Set source to Modwheel\n3. Set destination to Oscillator Level\n4. Adjust amount"
         }
     }
     

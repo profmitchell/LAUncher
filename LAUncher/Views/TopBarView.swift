@@ -72,6 +72,14 @@ struct TopBarView: View {
                     }
                     .buttonStyle(.bordered)
                     .help("Map MIDI CC controllers to parameters")
+                    
+                    Button {
+                        session.isShowingChat = true
+                    } label: {
+                        Label("AI Chat", systemImage: "message.fill")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Chat with AI to control your synth")
                 }
 
                 engineControls

@@ -28,6 +28,8 @@ final class PluginHostSession: ObservableObject {
     @Published var isMusicalTypingEnabled = false
     @Published var isShowingParameterExport = false
     @Published var isShowingMCPTools = false
+    @Published var isShowingMIDIMap = false
+    @Published var isShowingChat = false
     @Published var exportedParameterJSON: String = ""
     @Published var selectedMidiSource: MidiSource? {
         didSet {
@@ -47,8 +49,6 @@ final class PluginHostSession: ObservableObject {
     let midiMapManager = MIDIMapManager()
     private var cancellables: Set<AnyCancellable> = []
     private var mcpServer: MCPServerManager?
-    
-    @Published var isShowingMIDIMap = false
 
     init() {
         observeEngine()
@@ -360,17 +360,21 @@ final class PluginHostSession: ObservableObject {
                     }
                 }
                 
-                // Apply existing mappings
-                if let mapping = midiMapManager.mappings.first(where: { $0.ccNumber == ccNumber }),
-                   let param = self.findParameter(identifier: mapping.parameterId) {
-                    // Convert MIDI CC (0-127) to parameter value
-                    let normalizedValue = Float(ccValue) / 127.0
-                    let paramValue = mapping.minValue + (normalizedValue * (mapping.maxValue - mapping.minValue))
-                    
-                    // Set parameter value
-                    let clampedValue = max(param.minValue, min(param.maxValue, AUValue(paramValue)))
-                    param.setValue(clampedValue, originator: nil)
-                    
+                // Apply existing mappings - support multiple parameters per CC
+                let mappingsForCC = midiMapManager.mappings.filter { $0.ccNumber == ccNumber }
+                for mapping in mappingsForCC {
+                    if let param = self.findParameter(identifier: mapping.parameterId) {
+                        // Convert MIDI CC (0-127) to parameter value
+                        let normalizedValue = Float(ccValue) / 127.0
+                        let paramValue = mapping.minValue + (normalizedValue * (mapping.maxValue - mapping.minValue))
+                        
+                        // Set parameter value
+                        let clampedValue = max(param.minValue, min(param.maxValue, AUValue(paramValue)))
+                        param.setValue(clampedValue, originator: nil)
+                    }
+                }
+                
+                if !mappingsForCC.isEmpty {
                     return // Handled
                 }
             }
@@ -866,5 +870,27 @@ final class PluginHostSession: ObservableObject {
         }
         
         return (summary, (brightness, warmth, roughness, space))
+    }
+    
+    func sendChatMessage(_ message: String) async throws -> String {
+        guard let url = URL(string: "http://localhost:5555/api/chat") else {
+            throw NSError(domain: "PluginHostSession", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid URL"])
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let body: [String: Any] = ["message": message]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        
+        let (data, _) = try await URLSession.shared.data(for: request)
+        
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let response = json["response"] as? String else {
+            throw NSError(domain: "PluginHostSession", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response format"])
+        }
+        
+        return response
     }
 }

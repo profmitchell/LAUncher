@@ -32,6 +32,9 @@ struct RootHostView: View {
         .sheet(isPresented: $session.isShowingMIDIMap) {
             MIDIMapView(session: session)
         }
+        .sheet(isPresented: $session.isShowingChat) {
+            ChatView(session: session)
+        }
     }
 
     private var backgroundGradient: LinearGradient {

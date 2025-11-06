@@ -103,6 +103,37 @@ final class MIDIMapManager: ObservableObject {
         }
     }
     
+    func createMapping(parameterId: String, parameterDisplayName: String, ccNumber: UInt8, minValue: Float, maxValue: Float) {
+        // Check if mapping already exists
+        if mappings.contains(where: { $0.parameterId == parameterId && $0.ccNumber == ccNumber }) {
+            print("⚠️ Mapping already exists for \(parameterDisplayName) to CC \(ccNumber)")
+            return
+        }
+        
+        let mapping = MIDIMapping(
+            parameterId: parameterId,
+            parameterDisplayName: parameterDisplayName,
+            ccNumber: ccNumber,
+            minValue: minValue,
+            maxValue: maxValue
+        )
+        mappings.append(mapping)
+        saveMappings()
+        print("✅ Created mapping: \(parameterDisplayName) → CC \(ccNumber)")
+    }
+    
+    func createMappingsForCC(ccNumber: UInt8, parameterIds: [(id: String, displayName: String, minValue: Float, maxValue: Float)]) {
+        for paramInfo in parameterIds {
+            createMapping(
+                parameterId: paramInfo.id,
+                parameterDisplayName: paramInfo.displayName,
+                ccNumber: ccNumber,
+                minValue: paramInfo.minValue,
+                maxValue: paramInfo.maxValue
+            )
+        }
+    }
+    
     func getCCValueForParameter(_ parameterId: String, ccValue: UInt8) -> Float? {
         guard let mapping = mappings.first(where: { $0.parameterId == parameterId }) else {
             return nil
