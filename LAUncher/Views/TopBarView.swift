@@ -107,12 +107,11 @@ struct TopBarView: View {
             }
             
             HStack(spacing: 8) {
-                // Left channel of stereo output
-                Label("L", systemImage: "speaker.wave.1")
+                // OUTPUT 1 (stereo)
+                Label("Output 1", systemImage: "speaker.wave.2")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .frame(width: 20)
-                Picker("Left Output", selection: $session.selectedOutputLeft) {
+                Picker("Output 1", selection: $session.selectedOutput1) {
                     Text("None").tag(Optional<AudioDevice>.none)
                     ForEach(session.outputDevices) { device in
                         Text(device.name).tag(Optional(device))
@@ -121,12 +120,11 @@ struct TopBarView: View {
                 .pickerStyle(.menu)
                 .frame(width: 150)
                 
-                // Right channel of stereo output
-                Label("R", systemImage: "speaker.wave.1")
+                // OUTPUT 2 (stereo)
+                Label("Output 2", systemImage: "speaker.wave.2")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .frame(width: 20)
-                Picker("Right Output", selection: $session.selectedOutputRight) {
+                Picker("Output 2", selection: $session.selectedOutput2) {
                     Text("None").tag(Optional<AudioDevice>.none)
                     ForEach(session.outputDevices) { device in
                         Text(device.name).tag(Optional(device))

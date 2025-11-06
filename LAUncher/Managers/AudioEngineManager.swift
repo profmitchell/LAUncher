@@ -363,22 +363,22 @@ final class AudioEngineManager: ObservableObject {
         }
     }
     
-    func setOutputDevices(left: AudioDevice?, right: AudioDevice?) throws {
+    func setOutputDevices(output1: AudioDevice?, output2: AudioDevice?) throws {
         // Stop engine first
         let wasRunning = isRunning
         if isRunning {
             stopEngine()
         }
         
-        // Configure output devices
-        if let leftDevice = left {
+        // Configure output device 1 (primary stereo output)
+        if let device1 = output1 {
             var propertyAddress = AudioObjectPropertyAddress(
                 mSelector: kAudioHardwarePropertyDefaultOutputDevice,
                 mScope: kAudioObjectPropertyScopeGlobal,
                 mElement: kAudioObjectPropertyElementMain
             )
             
-            var deviceID = leftDevice.id
+            var deviceID = device1.id
             let dataSize = UInt32(MemoryLayout<AudioDeviceID>.size)
             let status = AudioObjectSetPropertyData(
                 AudioObjectID(kAudioObjectSystemObject),
@@ -390,12 +390,15 @@ final class AudioEngineManager: ObservableObject {
             )
             
             if status != noErr {
-                throw NSError(domain: "AudioEngineManager", code: Int(status), userInfo: [NSLocalizedDescriptionKey: "Failed to set output device"])
+                throw NSError(domain: "AudioEngineManager", code: Int(status), userInfo: [NSLocalizedDescriptionKey: "Failed to set output device 1"])
             }
         }
         
-        outputNode1 = engine.outputNode
-        outputNode2 = right != nil ? engine.outputNode : nil // For now, same node for stereo
+        outputNode1 = output1 != nil ? engine.outputNode : nil
+        
+        // Note: Output 2 would require a separate audio engine or multi-output setup
+        // For now, we track it but use the same output node
+        outputNode2 = output2 != nil ? engine.outputNode : nil
         
         // Reconfigure routing
         reconfigureRouting()
@@ -407,10 +410,55 @@ final class AudioEngineManager: ObservableObject {
     }
     
     private func reconfigureRouting() {
-        // Disconnect everything first
-        engine.disconnectNodeInput(engine.mainMixerNode)
+        // Stop engine before reconfiguring
+        let wasRunning = isRunning
+        if isRunning {
+            stopEngine()
+        }
+        
+        // Disconnect all existing connections properly
+        // Disconnect plugin from mixer if it exists
+        if let plugin = instrumentNode {
+            // Check if plugin is connected to mixer
+            let pluginConnections = engine.outputConnectionPoints(for: plugin, outputBus: 0)
+            for connection in pluginConnections {
+                if connection.node == engine.mainMixerNode {
+                    engine.disconnectNodeInput(engine.mainMixerNode, bus: connection.bus)
+                }
+            }
+        }
+        
+        // Disconnect input node if it exists
         if let input = inputNode {
-            engine.disconnectNodeInput(input)
+            // Disconnect any output connections from input
+            let inputConnections = engine.outputConnectionPoints(for: input, outputBus: 0)
+            for connection in inputConnections {
+                if let targetNode = connection.node {
+                    if targetNode == instrumentNode {
+                        // Disconnect from plugin
+                        engine.disconnectNodeInput(targetNode, bus: connection.bus)
+                    } else if targetNode == engine.mainMixerNode {
+                        // Disconnect from mixer
+                        engine.disconnectNodeInput(engine.mainMixerNode, bus: connection.bus)
+                    }
+                }
+            }
+        }
+        
+        // Disconnect tone generator if it exists
+        if let generator = toneGenerator {
+            let generatorConnections = engine.outputConnectionPoints(for: generator, outputBus: 0)
+            for connection in generatorConnections {
+                if let targetNode = connection.node {
+                    if targetNode == instrumentNode {
+                        // Disconnect from plugin
+                        engine.disconnectNodeInput(targetNode, bus: connection.bus)
+                    } else if targetNode == engine.mainMixerNode {
+                        // Disconnect from mixer
+                        engine.disconnectNodeInput(engine.mainMixerNode, bus: connection.bus)
+                    }
+                }
+            }
         }
         
         // Rebuild routing
@@ -426,8 +474,13 @@ final class AudioEngineManager: ObservableObject {
             }
         }
         
-        // Configure output
+        // Ensure mixer is connected to output
         configureMainMixerConnection()
+        
+        // Restart if was running
+        if wasRunning {
+            try? startEngine()
+        }
     }
 
     private func configureMainMixerConnection() {
