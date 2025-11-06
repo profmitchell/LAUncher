@@ -5,11 +5,19 @@ struct RootHostView: View {
     @StateObject private var session = PluginHostSession()
     @Environment(\.colorScheme) private var colorScheme
     @State private var chatWindow: NSWindow?
+    @State private var topBarHeight: CGFloat = 84
     
     var body: some View {
         ZStack(alignment: .bottom) {
             VStack(spacing: 0) {
-                TopBarView(session: session)
+                TopBarView(session: session, expanded: topBarHeight > 96)
+                    .frame(height: topBarHeight, alignment: .top)
+                    .overlay(
+                        // Drag handle overlay at the bottom edge of the top bar
+                        ResizableBar(height: $topBarHeight, minHeight: 56, maxHeight: 180)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    )
+
                 PluginCanvasView(session: session)
                 StatusBarView(session: session)
             }
@@ -79,6 +87,50 @@ struct RootHostView: View {
                     chatWindow = nil
                 }
             }
+        }
+    }
+
+    // MARK: - Resize Handle
+    private struct ResizableBar: View {
+        @Binding var height: CGFloat
+        let minHeight: CGFloat
+        let maxHeight: CGFloat
+
+        @State private var isHovering = false
+        @State private var startingHeight: CGFloat = 0
+
+        var body: some View {
+            ZStack(alignment: .bottom) {
+                Rectangle()
+                    .fill(Color.black.opacity(0.1))
+                    .frame(height: 1)
+                    .opacity(0.6)
+                Capsule(style: .continuous)
+                    .fill(Color.primary.opacity(isHovering ? 0.25 : 0.15))
+                    .frame(width: 64, height: 4)
+                    .padding(.vertical, 4)
+            }
+            .frame(height: 12)
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                isHovering = hovering
+                if hovering {
+                    NSCursor.resizeUpDown.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        if startingHeight == 0 { startingHeight = height }
+                        let proposed = startingHeight + value.translation.height
+                        height = min(max(proposed, minHeight), maxHeight)
+                    }
+                    .onEnded { _ in
+                        startingHeight = 0
+                    }
+            )
         }
     }
 
