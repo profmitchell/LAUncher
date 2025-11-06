@@ -26,6 +26,7 @@ final class PluginHostSession: ObservableObject {
 
     @Published var isShowingPluginPicker = false
     @Published var isMusicalTypingEnabled = false
+    @Published var isMusicalTypingVisible = true
     @Published var isShowingParameterExport = false
     @Published var isShowingMCPTools = false
     @Published var isShowingMIDIMap = false

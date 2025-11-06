@@ -4,6 +4,7 @@ import AVFAudio
 struct TopBarView: View {
     @ObservedObject var session: PluginHostSession
     var expanded: Bool = false
+    @State private var showIOPopover = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -29,10 +30,10 @@ struct TopBarView: View {
                     }
                     HStack(spacing: 16) {
                         engineControls
-                        audioControls
-                        midiControls
+                        ioButton
                         Spacer(minLength: 8)
                         musicalTypingToggle
+                        moreMenu
                     }
                 }
             } else {
@@ -42,9 +43,9 @@ struct TopBarView: View {
                         Spacer(minLength: 12)
                         actionButtons
                         engineControls
-                        audioControls
-                        midiControls
+                        ioButton
                         musicalTypingToggle
+                        moreMenu
                     }
                 }
             }
@@ -76,71 +77,54 @@ struct TopBarView: View {
                 Label("Load Plugin…", systemImage: "plus.square.on.square")
             }
             .buttonStyle(.borderedProminent)
-
-            Button {
-                session.rescanPlugins()
-            } label: {
-                Label("Rescan", systemImage: "arrow.clockwise")
-            }
-            .buttonStyle(.bordered)
-            .help("Rescan for new plugins")
-
-            if session.currentComponent != nil {
-                Button {
-                    session.unloadCurrentInstrument()
-                } label: {
-                    Label("Unload", systemImage: "eject")
-                }
-                .buttonStyle(.bordered)
-
-                // Default plugin management
-                Menu {
-                    Button("Set as Default") {
-                        if let component = session.currentComponent {
-                            session.setDefaultPlugin(component)
-                        }
-                    }
-                    Button("Clear Default") {
-                        session.clearDefaultPlugin()
-                    }
-                } label: {
-                    Label("Default", systemImage: "star")
-                }
-                .buttonStyle(.bordered)
-
-                Button {
-                    session.exportParametersAsJSON()
-                } label: {
-                    Label("Export Params", systemImage: "doc.text")
-                }
-                .buttonStyle(.bordered)
-                .help("Export plugin parameters as JSON")
-
-                Button {
-                    session.isShowingMCPTools = true
-                } label: {
-                    Label("MCP Tools", systemImage: "wand.and.stars")
-                }
-                .buttonStyle(.bordered)
-                .help("Open MCP tools for intelligent parameter control")
-
-                Button {
-                    session.isShowingMIDIMap = true
-                } label: {
-                    Label("MIDI Learn", systemImage: "keyboard")
-                }
-                .buttonStyle(.bordered)
-                .help("Map MIDI CC controllers to parameters")
-
-                Button {
-                    session.isShowingChat = true
-                } label: {
-                    Label("AI Chat", systemImage: "message.fill")
-                }
-                .buttonStyle(.bordered)
-                .help("Chat with AI to control your synth")
-            }
         }
+    }
+
+    private var ioButton: some View {
+        Button {
+            showIOPopover.toggle()
+        } label: {
+            Label("I/O", systemImage: "slider.horizontal.3")
+        }
+        .buttonStyle(.bordered)
+        .popover(isPresented: $showIOPopover, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 12) {
+                audioControls
+                Divider()
+                midiControls
+            }
+            .padding(12)
+            .frame(width: 460)
+        }
+        .help("Audio and MIDI device selection")
+    }
+
+    private var moreMenu: some View {
+        Menu {
+            Button("Rescan Plugins", systemImage: "arrow.clockwise") { session.rescanPlugins() }
+            if session.currentComponent != nil {
+                Button("Unload Plugin", systemImage: "eject") { session.unloadCurrentInstrument() }
+                Divider()
+                Button("Export Parameters", systemImage: "doc.text") { session.exportParametersAsJSON() }
+                Button("MCP Tools", systemImage: "wand.and.stars") { session.isShowingMCPTools = true }
+                Button("MIDI Learn", systemImage: "keyboard") { session.isShowingMIDIMap = true }
+                Button("AI Chat", systemImage: "message.fill") { session.isShowingChat = true }
+                Divider()
+                Button("Set as Default", systemImage: "star") {
+                    if let c = session.currentComponent { session.setDefaultPlugin(c) }
+                }
+                Button("Clear Default", systemImage: "star.slash") { session.clearDefaultPlugin() }
+            }
+            Divider()
+            if session.isMusicalTypingVisible {
+                Button("Hide On-screen Keyboard", systemImage: "eye.slash") { session.isMusicalTypingVisible = false }
+            } else {
+                Button("Show On-screen Keyboard", systemImage: "eye") { session.isMusicalTypingVisible = true }
+            }
+        } label: {
+            Label("More", systemImage: "ellipsis.circle")
+        }
+        .buttonStyle(.bordered)
     }
 
     private var engineControls: some View {

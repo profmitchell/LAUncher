@@ -6,6 +6,7 @@ struct RootHostView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var chatWindow: NSWindow?
     @State private var topBarHeight: CGFloat = 84
+    @State private var mtOffset: CGSize = .zero
     
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -23,8 +24,8 @@ struct RootHostView: View {
             }
             .background(backgroundGradient.ignoresSafeArea())
 
-            if session.isMusicalTypingEnabled {
-                MusicalTypingView(session: session)
+            if session.isMusicalTypingEnabled && session.isMusicalTypingVisible {
+                DraggableMusicalTyping(session: session, offset: $mtOffset)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .padding(.bottom, 12)
             }
@@ -137,6 +138,35 @@ struct RootHostView: View {
                         startingHeight = 0
                     }
             )
+        }
+    }
+
+    // MARK: - Draggable Musical Typing Container
+    private struct DraggableMusicalTyping: View {
+        @ObservedObject var session: PluginHostSession
+        @Binding var offset: CGSize
+        @State private var dragStart: CGSize = .zero
+
+        var body: some View {
+            VStack(spacing: 0) {
+                Capsule(style: .continuous)
+                    .fill(Color.primary.opacity(0.12))
+                    .frame(width: 80, height: 6)
+                    .padding(.top, 6)
+                    .padding(.bottom, 4)
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                if dragStart == .zero { dragStart = offset }
+                                offset = CGSize(width: dragStart.width + value.translation.width,
+                                                height: dragStart.height + value.translation.height)
+                            }
+                            .onEnded { _ in dragStart = .zero }
+                    )
+                MusicalTypingView(session: session)
+            }
+            .background(Color.clear)
+            .offset(offset)
         }
     }
 
