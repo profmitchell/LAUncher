@@ -6,6 +6,7 @@ final class MusicalTypingManager: ObservableObject {
     @Published var baseOctave: Int = 4
     @Published var transpose: Int = 0
     @Published var velocity: UInt8 = 100
+    @Published private(set) var activeNotes: Set<UInt8> = []
 
     private var activeKeys: [Character: UInt8] = [:]
 
@@ -27,18 +28,47 @@ final class MusicalTypingManager: ObservableObject {
 
     func handleKeyDown(char: Character) {
         let c = Character(String(char).lowercased())
+        if c == "[" {
+            baseOctave = max(baseOctave - 1, 1)
+            return
+        }
+        if c == "]" {
+            baseOctave = min(baseOctave + 1, 8)
+            return
+        }
         guard let semitone = keyToSemitone[c] else { return }
         if activeKeys[c] != nil { return } // ignore repeats
         let note = UInt8(currentBaseNote() + semitone)
         activeKeys[c] = note
+        activeNotes.insert(note)
         sendNoteOn?(note, velocity)
     }
 
     func handleKeyUp(char: Character) {
         let c = Character(String(char).lowercased())
         guard let note = activeKeys.removeValue(forKey: c) else { return }
+        activeNotes.remove(note)
         sendNoteOff?(note)
     }
-}
 
+    func playPreview(note: UInt8) {
+        guard !activeNotes.contains(note) else { return }
+        activeNotes.insert(note)
+        sendNoteOn?(note, velocity)
+    }
+
+    func stopPreview(note: UInt8) {
+        guard activeNotes.remove(note) != nil else { return }
+        sendNoteOff?(note)
+    }
+
+    func releaseAllNotes() {
+        let notes = Set(activeKeys.values).union(activeNotes)
+        activeKeys.removeAll()
+        activeNotes.removeAll()
+        for note in notes {
+            sendNoteOff?(note)
+        }
+    }
+}
 

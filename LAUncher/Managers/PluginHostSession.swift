@@ -31,7 +31,13 @@ final class PluginHostSession: ObservableObject {
     @Published private(set) var lastMidiEvent: MidiEvent?
 
     @Published var isShowingPluginPicker = false
-    @Published var isMusicalTypingEnabled = false
+    @Published var isMusicalTypingEnabled = false {
+        didSet {
+            if !isMusicalTypingEnabled {
+                musicalTypingManager.releaseAllNotes()
+            }
+        }
+    }
     @Published var isMusicalTypingVisible = true
     @Published var isShowingParameterExport = false
     @Published var isShowingMCPTools = false
@@ -43,6 +49,23 @@ final class PluginHostSession: ObservableObject {
     
     // Parameter analysis cache
     @Published private(set) var analyzedParameters: ParameterAnalysis?
+    @Published private(set) var factoryPresets: [AUAudioUnitPreset] = []
+    @Published private(set) var currentPresetName: String?
+    @Published private(set) var recentPlugins: [RecentPlugin] = []
+
+    struct RecentPlugin: Identifiable, Codable, Equatable {
+        let componentType: Int
+        let componentSubType: Int
+        let componentManufacturer: Int
+        let name: String
+        let manufacturerName: String
+        let typeName: String
+        let loadedAt: Date
+
+        var id: String {
+            "\(componentType)-\(componentSubType)-\(componentManufacturer)"
+        }
+    }
     
     struct ParameterAnalysis {
         var oscillatorLevelIds: [String] = []
@@ -81,6 +104,7 @@ final class PluginHostSession: ObservableObject {
         observeMidi()
         refreshInstrumentList()
         refreshPluginList()
+        loadRecentPlugins()
         refreshMetrics()
         audioDeviceManager.refreshDevices()
         
@@ -265,6 +289,7 @@ final class PluginHostSession: ObservableObject {
             // Try to load the plugin - for AUv3 plugins, we might need to try different approaches
             let node = try await engineManager.loadPlugin(componentDescription: desc, component: component)
             currentComponent = component
+            recordRecentPlugin(component)
             refreshMetrics()
             
             print("✅ Successfully loaded plugin '\(component.name)'")
@@ -278,6 +303,7 @@ final class PluginHostSession: ObservableObject {
             }
             
             engineState = .running
+            refreshPresetList()
             
             // Analyze parameters after successful load
             Task {
@@ -322,6 +348,8 @@ final class PluginHostSession: ObservableObject {
         currentComponent = nil
         pluginViewController = nil
         analyzedParameters = nil
+        factoryPresets = []
+        currentPresetName = nil
         parameterChangeMonitor?.cancel()
         parameterChangeMonitor = nil
         isMonitoringParameterChanges = false
@@ -335,6 +363,7 @@ final class PluginHostSession: ObservableObject {
     private let defaultSubTypeKey = "DefaultPluginSubType"
     private let defaultManuKey = "DefaultPluginManufacturer"
     private let defaultNameKey = "DefaultPluginName"
+    private let recentPluginsKey = "RecentPlugins"
 
     func setDefaultPlugin(_ component: AVAudioUnitComponent) {
         let desc = component.audioComponentDescription
@@ -373,6 +402,90 @@ final class PluginHostSession: ObservableObject {
         }) {
             await load(component: matched)
         }
+    }
+
+    var recentPluginComponents: [AVAudioUnitComponent] {
+        recentPlugins.compactMap { recent in
+            availablePlugins.first { componentMatches($0, recent) }
+        }
+    }
+
+    func loadRecentPlugin(_ recent: RecentPlugin) async {
+        guard let component = availablePlugins.first(where: { componentMatches($0, recent) }) else {
+            lastErrorDescription = "\(recent.name) is no longer available. Try rescanning plugins."
+            return
+        }
+        await load(component: component)
+    }
+
+    func clearRecentPlugins() {
+        recentPlugins = []
+        defaults.removeObject(forKey: recentPluginsKey)
+    }
+
+    func refreshPresetList() {
+        guard let audioUnit = engineManager.auAudioUnit else {
+            factoryPresets = []
+            currentPresetName = nil
+            return
+        }
+
+        factoryPresets = audioUnit.factoryPresets ?? []
+        currentPresetName = audioUnit.currentPreset?.name
+    }
+
+    func applyPreset(_ preset: AUAudioUnitPreset) {
+        guard let audioUnit = engineManager.auAudioUnit else { return }
+        audioUnit.currentPreset = preset
+        currentPresetName = preset.name
+        forcePluginUIRefresh()
+    }
+
+    private func forcePluginUIRefresh() {
+        guard let viewController = pluginViewController else { return }
+        viewController.view.needsLayout = true
+        viewController.view.setNeedsDisplay(viewController.view.bounds)
+        for subview in viewController.view.subviews {
+            subview.needsLayout = true
+            subview.setNeedsDisplay(subview.bounds)
+        }
+    }
+
+    private func loadRecentPlugins() {
+        guard let data = defaults.data(forKey: recentPluginsKey),
+              let decoded = try? JSONDecoder().decode([RecentPlugin].self, from: data) else {
+            recentPlugins = []
+            return
+        }
+        recentPlugins = decoded
+    }
+
+    private func recordRecentPlugin(_ component: AVAudioUnitComponent) {
+        let desc = component.audioComponentDescription
+        let recent = RecentPlugin(
+            componentType: Int(desc.componentType),
+            componentSubType: Int(desc.componentSubType),
+            componentManufacturer: Int(desc.componentManufacturer),
+            name: component.name,
+            manufacturerName: component.manufacturerName,
+            typeName: component.typeName,
+            loadedAt: Date()
+        )
+
+        recentPlugins.removeAll { $0.id == recent.id }
+        recentPlugins.insert(recent, at: 0)
+        recentPlugins = Array(recentPlugins.prefix(12))
+
+        if let data = try? JSONEncoder().encode(recentPlugins) {
+            defaults.set(data, forKey: recentPluginsKey)
+        }
+    }
+
+    private func componentMatches(_ component: AVAudioUnitComponent, _ recent: RecentPlugin) -> Bool {
+        let desc = component.audioComponentDescription
+        return Int(desc.componentType) == recent.componentType &&
+               Int(desc.componentSubType) == recent.componentSubType &&
+               Int(desc.componentManufacturer) == recent.componentManufacturer
     }
 
     func toggleTransport() {

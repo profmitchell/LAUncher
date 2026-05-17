@@ -2,9 +2,13 @@ import SwiftUI
 
 struct MusicalTypingView: View {
     @ObservedObject var session: PluginHostSession
-    @State private var activeNotes: Set<UInt8> = []
-    @State private var octaveOffset: Int = 4
+    @ObservedObject private var manager: MusicalTypingManager
     @Environment(\.colorScheme) private var colorScheme
+
+    init(session: PluginHostSession) {
+        self.session = session
+        self.manager = session.musicalTypingManager
+    }
 
     private let whiteKeys: [(label: String, semitone: Int)] = [
         ("Z", 0), ("X", 2), ("C", 4), ("V", 5), ("B", 7), ("N", 9), ("M", 11)
@@ -18,22 +22,40 @@ struct MusicalTypingView: View {
         VStack(spacing: 12) {
             HStack {
                 Button {
-                    octaveOffset = max(octaveOffset - 1, 1)
+                    manager.baseOctave = max(manager.baseOctave - 1, 1)
                 } label: {
                     Label("Octave Down", systemImage: "chevron.down")
                 }
                 .buttonStyle(.bordered)
+                .help("Octave down ([)")
 
-                Text("QWERTY Piano • Octave \(octaveOffset)")
+                Text("QWERTY Piano • Octave \(manager.baseOctave)")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
                 Button {
-                    octaveOffset = min(octaveOffset + 1, 8)
+                    manager.baseOctave = min(manager.baseOctave + 1, 8)
                 } label: {
                     Label("Octave Up", systemImage: "chevron.up")
                 }
                 .buttonStyle(.bordered)
+                .help("Octave up (])")
+
+                Divider()
+                    .frame(height: 20)
+
+                Label("Velocity", systemImage: "speaker.wave.2")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Slider(
+                    value: Binding(
+                        get: { Double(manager.velocity) },
+                        set: { manager.velocity = UInt8($0.rounded()) }
+                    ),
+                    in: 1...127,
+                    step: 1
+                )
+                .frame(width: 120)
             }
 
             ZStack {
@@ -44,8 +66,7 @@ struct MusicalTypingView: View {
             }
         }
         .padding(16)
-        .background(musicalTypingBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .launcherGlassPanel(cornerRadius: 16, fallbackColor: musicalTypingBackground)
         .shadow(color: shadowColor, radius: 8, y: 4)
         .padding(.horizontal, 24)
     }
@@ -57,8 +78,8 @@ struct MusicalTypingView: View {
                     label: key.label,
                     noteNumber: noteNumber(for: key.semitone),
                     isBlackKey: false,
-                    isActive: activeNotes.contains(noteNumber(for: key.semitone)),
-                    session: session,
+                    isActive: manager.activeNotes.contains(noteNumber(for: key.semitone)),
+                    manager: manager,
                     onChange: handleNoteStateChange
                 )
             }
@@ -72,8 +93,8 @@ struct MusicalTypingView: View {
                     label: key.label,
                     noteNumber: noteNumber(for: key.semitone),
                     isBlackKey: true,
-                    isActive: activeNotes.contains(noteNumber(for: key.semitone)),
-                    session: session,
+                    isActive: manager.activeNotes.contains(noteNumber(for: key.semitone)),
+                    manager: manager,
                     onChange: handleNoteStateChange
                 )
                 .frame(width: 48)
@@ -83,16 +104,14 @@ struct MusicalTypingView: View {
 
     private func handleNoteStateChange(_ note: UInt8, isPressed: Bool) {
         if isPressed {
-            activeNotes.insert(note)
-            session.sendVirtualNoteOn(noteNumber: note, velocity: 100)
+            manager.playPreview(note: note)
         } else {
-            activeNotes.remove(note)
-            session.sendVirtualNoteOff(noteNumber: note)
+            manager.stopPreview(note: note)
         }
     }
 
     private func noteNumber(for semitone: Int) -> UInt8 {
-        let base = octaveOffset * 12
+        let base = manager.baseOctave * 12 + manager.transpose
         return UInt8(clamping: base + semitone)
     }
 }
@@ -102,7 +121,7 @@ private struct MusicalTypingKey: View {
     let noteNumber: UInt8
     let isBlackKey: Bool
     let isActive: Bool
-    let session: PluginHostSession
+    let manager: MusicalTypingManager
     let onChange: (_ note: UInt8, _ isPressed: Bool) -> Void
 
     @State private var isPressed = false
@@ -163,5 +182,18 @@ private extension MusicalTypingView {
 
     var shadowColor: Color {
         colorScheme == .dark ? Color.black.opacity(0.6) : Color.black.opacity(0.15)
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func launcherGlassPanel(cornerRadius: CGFloat, fallbackColor: Color) -> some View {
+        if #available(macOS 26.0, *) {
+            self.glassEffect(.regular.interactive(), in: .rect(cornerRadius: cornerRadius))
+        } else {
+            self
+                .background(fallbackColor)
+                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        }
     }
 }

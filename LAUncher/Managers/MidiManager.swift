@@ -13,7 +13,7 @@ final class MidiManager: ObservableObject {
 
     private var client: MIDIClientRef = 0
     private var inputPort: MIDIPortRef = 0
-    private var connectedSource: MidiSource?
+    private var connectedSourceIDs = Set<MIDIUniqueID>()
     private var endpointCache: [MIDIUniqueID: MIDIEndpointRef] = [:]
 
     init() {
@@ -22,6 +22,7 @@ final class MidiManager: ObservableObject {
         if let first = availableSources.first {
             selectedSource = first
         }
+        updateConnection()
     }
 
     func refreshSources() {
@@ -50,6 +51,8 @@ final class MidiManager: ObservableObject {
 
         if let selected = selectedSource, !availableSources.contains(selected) {
             selectedSource = availableSources.first
+        } else {
+            updateConnection()
         }
     }
 
@@ -69,27 +72,32 @@ final class MidiManager: ObservableObject {
     private func updateConnection() {
         guard inputPort != 0 else { return }
 
-        if let connected = connectedSource, connected != selectedSource {
-            if let endpoint = endpointCache[connected.id] {
+        for sourceID in connectedSourceIDs {
+            if let endpoint = endpointCache[sourceID] {
                 MIDIPortDisconnectSource(inputPort, endpoint)
             }
-            connectedSource = nil
+        }
+        connectedSourceIDs.removeAll()
+
+        let sourcesToConnect: [MidiSource]
+        if let selectedSource {
+            sourcesToConnect = [selectedSource]
+        } else {
+            sourcesToConnect = availableSources
         }
 
-        guard let selectedSource, selectedSource != connectedSource else {
-            return
-        }
-
-        guard let endpoint = endpointCache[selectedSource.id] else { return }
-
-        let result = MIDIPortConnectSource(inputPort, endpoint, nil)
-        if result == noErr {
-            connectedSource = selectedSource
+        for source in sourcesToConnect {
+            guard let endpoint = endpointCache[source.id] else { continue }
+            let result = MIDIPortConnectSource(inputPort, endpoint, nil)
+            if result == noErr {
+                connectedSourceIDs.insert(source.id)
+            }
         }
     }
 
     private func handle(packetList: UnsafePointer<MIDIPacketList>) {
-        guard let source = connectedSource else { return }
+        guard !connectedSourceIDs.isEmpty else { return }
+        let source = selectedSource
 
         let numPackets = Int(packetList.pointee.numPackets)
         let listPointer = UnsafeMutablePointer(mutating: packetList)
@@ -104,13 +112,13 @@ final class MidiManager: ObservableObject {
                 Array(rawBuffer.prefix(byteCount))
             }
 
-            if bytes.count >= 3 {
+            for message in parseMidiMessages(bytes) {
                 let event = MidiEvent(
                     timestamp: packet.timeStamp,
                     source: source,
-                    statusByte: bytes[0],
-                    data1: bytes[1],
-                    data2: bytes[2]
+                    statusByte: message.status,
+                    data1: message.data1,
+                    data2: message.data2
                 )
                 Task { @MainActor in
                     self.eventHandler?(event)
@@ -118,6 +126,50 @@ final class MidiManager: ObservableObject {
             }
 
             packetPointer = MIDIPacketNext(packetPointer)
+        }
+    }
+
+    private func parseMidiMessages(_ bytes: [UInt8]) -> [(status: UInt8, data1: UInt8, data2: UInt8)] {
+        var messages: [(status: UInt8, data1: UInt8, data2: UInt8)] = []
+        var index = 0
+        var runningStatus: UInt8?
+
+        while index < bytes.count {
+            let byte = bytes[index]
+            let status: UInt8
+
+            if byte & 0x80 != 0 {
+                status = byte
+                runningStatus = status
+                index += 1
+            } else if let existingStatus = runningStatus {
+                status = existingStatus
+            } else {
+                index += 1
+                continue
+            }
+
+            let dataLength = midiDataLength(for: status)
+            guard dataLength > 0 else { continue }
+            guard index + dataLength <= bytes.count else { break }
+
+            let data1 = bytes[index]
+            let data2 = dataLength > 1 ? bytes[index + 1] : 0
+            messages.append((status, data1, data2))
+            index += dataLength
+        }
+
+        return messages
+    }
+
+    private func midiDataLength(for status: UInt8) -> Int {
+        switch status & 0xF0 {
+        case 0xC0, 0xD0:
+            return 1
+        case 0x80, 0x90, 0xA0, 0xB0, 0xE0:
+            return 2
+        default:
+            return 0
         }
     }
 }

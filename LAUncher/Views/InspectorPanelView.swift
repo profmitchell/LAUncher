@@ -1,10 +1,11 @@
 import SwiftUI
+import AudioToolbox
 
 struct InspectorPanelView: View {
     @ObservedObject var session: PluginHostSession
     @State private var selection: Tab = .io
 
-    enum Tab: String, CaseIterable { case io = "I/O", midi = "MIDI" }
+    enum Tab: String, CaseIterable { case io = "I/O", midi = "MIDI", presets = "Presets" }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -44,6 +45,8 @@ struct InspectorPanelView: View {
                     ioView
                 case .midi:
                     midiView
+                case .presets:
+                    presetView
                 }
             }
             .padding(12)
@@ -96,6 +99,55 @@ struct InspectorPanelView: View {
             }
         }
     }
+
+    private var presetView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Plugin Presets").font(.headline)
+                Spacer()
+                Button {
+                    session.refreshPresetList()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .help("Refresh preset list")
+            }
+
+            if session.currentComponent == nil {
+                Text("Load a plugin to browse presets.")
+                    .foregroundStyle(.secondary)
+            } else if session.factoryPresets.isEmpty {
+                Text("This plugin does not expose factory presets to the host.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                if let currentPresetName = session.currentPresetName {
+                    Label(currentPresetName, systemImage: "checkmark.circle")
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+
+                List {
+                    ForEach(Array(session.factoryPresets.enumerated()), id: \.offset) { _, preset in
+                        Button {
+                            session.applyPreset(preset)
+                        } label: {
+                            HStack {
+                                Text(preset.name)
+                                    .lineLimit(1)
+                                Spacer()
+                                if session.currentPresetName == preset.name {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(.tint)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .listStyle(.inset)
+                .frame(minHeight: 220)
+            }
+        }
+    }
 }
-
-
