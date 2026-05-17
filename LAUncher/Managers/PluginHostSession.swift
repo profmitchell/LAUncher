@@ -1118,6 +1118,7 @@ final class PluginHostSession: ObservableObject {
 
     /// Refreshes `analyzedParameters` (osc / filter / mod-matrix routing used by MCP chat), runs `analyzePatch()` for a short text summary, and returns a **compact** JSON-friendly snapshot (not the full AU tree).
     func exportPatchAnalysisContext() async throws -> [String: Any] {
+        refreshPresetList()
         await analyzeParameters()
         let (summary, timbre) = try await analyzePatch()
         let pluginName = currentComponent?.name ?? "Unknown"
