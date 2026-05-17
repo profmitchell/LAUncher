@@ -290,14 +290,12 @@ Explains what selected parameters do in musical terms.
 
 ## Implementation Status
 
-**Current:** Mock implementation with in-memory data
-- All tools work with mock plugin data
-- Patch library stored in memory
+**Current (launcher-server.js):** Live **LAUncher HTTP API** only (`http://localhost:5555` by default, override with `LAUNCHER_HTTP_URL`). There is **no mock fallback** — if the app is not running or no plugin is loaded, tool calls return a JSON-RPC error.
 
-**Future:** HTTP API integration
-- Replace mock data with calls to LAUncher HTTP API
-- Persistent patch library storage
-- Real-time parameter updates
+- **Wired:** `get_parameters`, `set_parameters`, `randomize_parameters`, `get_patch_snapshot` (from live AU params), `set_patch_snapshot` (inline `rawParameters` → `set_parameters`), `explain_parameters` (from live AU metadata).
+- **Not on HTTP yet:** `save_patch_to_library`, `analyze_patch` — calls fail with a clear “not implemented” message until Swift adds routes.
+
+**Requirements:** LAUncher running with the in-app MCP HTTP server active (starts with `PluginHostSession`) and a **plugin loaded** so `/api/get_parameters` returns data.
 
 ## Protocol
 
@@ -321,6 +319,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | node launcher-server.js
 2. **Node not found:** Ensure Node.js is installed and in PATH
 3. **Permission denied:** Run `chmod +x launcher-server.js`
 4. **Connection errors:** Restart Cursor after configuration changes
+5. **"LAUncher HTTP API not reachable":** Open LAUncher, load a plugin, confirm port 5555 (optional: `curl http://127.0.0.1:5555/health`). Use `LAUNCHER_HTTP_URL` if the app listens elsewhere.
 
 ## See Also
 

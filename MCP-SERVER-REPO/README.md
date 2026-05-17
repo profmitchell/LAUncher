@@ -62,6 +62,16 @@ The server implements JSON-RPC 2.0 over stdin/stdout:
 - **Transport:** stdio (stdin/stdout)
 - **Error Codes:** Standard JSON-RPC 2.0 codes
 
+## VS Code extension
+
+The **LAUncher MCP** setup UI (activity bar panel, MCP install/remove, smoke test) is in [vscode-launcher-mcp/](vscode-launcher-mcp/). From this repo:
+
+```bash
+cd vscode-launcher-mcp && npm install && npm run compile
+```
+
+Open that folder in VS Code and press **F5** to run the extension in a development host.
+
 ## Documentation
 
 - [MCP-PRD.md](MCP-PRD.md) - Complete product requirements and specification

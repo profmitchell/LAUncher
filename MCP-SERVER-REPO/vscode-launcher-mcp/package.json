@@ -1,0 +1,140 @@
+{
+  "name": "vscode-launcher-mcp",
+  "displayName": "LAUncher MCP",
+  "description": "Install, validate, and remove the LAUncher MCP server configuration for VS Code and Cursor.",
+  "version": "0.2.0",
+  "private": true,
+  "publisher": "cohenconcepts",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": [
+    "onView:launcherMcp.config",
+    "onCommand:launcherMcp.openSetup",
+    "onCommand:launcherMcp.setupVsCodeWorkspace",
+    "onCommand:launcherMcp.setupVsCodeUser",
+    "onCommand:launcherMcp.setupCursorUser",
+    "onCommand:launcherMcp.removeFromConfigs",
+    "onCommand:launcherMcp.testServer",
+    "onCommand:launcherMcp.diagnose",
+    "onCommand:launcherMcp.openWorkspaceMcp",
+    "onCommand:launcherMcp.openCursorMcp",
+    "onCommand:launcherMcp.showOutput"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "launcher-mcp",
+          "title": "LAUncher MCP",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "launcher-mcp": [
+        {
+          "type": "webview",
+          "id": "launcherMcp.config",
+          "name": "Setup",
+          "visibility": "visible"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "launcherMcp.openSetup",
+        "title": "LAUncher MCP: Open setup panel",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "launcherMcp.setupVsCodeWorkspace",
+        "title": "LAUncher MCP: Add to workspace mcp.json (VS Code)"
+      },
+      {
+        "command": "launcherMcp.setupVsCodeUser",
+        "title": "LAUncher MCP: Add to user mcp.json (VS Code)"
+      },
+      {
+        "command": "launcherMcp.setupCursorUser",
+        "title": "LAUncher MCP: Add to Cursor ~/.cursor/mcp.json"
+      },
+      {
+        "command": "launcherMcp.removeFromConfigs",
+        "title": "LAUncher MCP: Remove from workspace, user, and Cursor configs"
+      },
+      {
+        "command": "launcherMcp.testServer",
+        "title": "LAUncher MCP: Run tools/list smoke test"
+      },
+      {
+        "command": "launcherMcp.diagnose",
+        "title": "LAUncher MCP: Diagnose (paths, Node, server, LAUncher HTTP)"
+      },
+      {
+        "command": "launcherMcp.openWorkspaceMcp",
+        "title": "LAUncher MCP: Open .vscode/mcp.json"
+      },
+      {
+        "command": "launcherMcp.openCursorMcp",
+        "title": "LAUncher MCP: Open ~/.cursor/mcp.json"
+      },
+      {
+        "command": "launcherMcp.showOutput",
+        "title": "LAUncher MCP: Show output log",
+        "icon": "$(output)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "launcherMcp.showOutput",
+          "when": "view == launcherMcp.config",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "LAUncher MCP",
+      "properties": {
+        "launcherMcp.serverScriptPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to launcher-server.js. Empty: auto-detect from the workspace."
+        },
+        "launcherMcp.nodeExecutable": {
+          "type": "string",
+          "default": "node",
+          "description": "Node executable used in MCP config and smoke tests."
+        },
+        "launcherMcp.vsCodeServerKey": {
+          "type": "string",
+          "default": "launcher",
+          "description": "Server id written into VS Code mcp.json under \"servers\"."
+        },
+        "launcherMcp.cursorServerKey": {
+          "type": "string",
+          "default": "launcher",
+          "description": "Server id written into Cursor mcp.json under \"mcpServers\"."
+        },
+        "launcherMcp.devWatchGlob": {
+          "type": "string",
+          "default": "**/launcher-server.js",
+          "description": "When the script lives under the workspace, optional VS Code dev.watch glob (empty to skip)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.95.0",
+    "typescript": "^5.5.0"
+  }
+}

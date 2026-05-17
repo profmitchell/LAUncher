@@ -19,9 +19,8 @@ struct TopBarView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, expanded ? 12 : 8)
         }
-        .background(themeManager.currentTheme.materialStyle.material)
-        .overlay(Rectangle().fill(themeManager.currentTheme.containerBorder.color.opacity(0.5)).frame(height: 1), alignment: .top)
-        .overlay(Rectangle().fill(themeManager.currentTheme.containerBorder.color.opacity(0.5)).frame(height: 1), alignment: .bottom)
+        .background(LauncherChrome.glassBackground(themeManager.currentTheme))
+        .overlay(Rectangle().fill(LauncherChrome.border(themeManager.currentTheme)).frame(height: 1), alignment: .bottom)
         .controlSize(expanded ? .large : .regular)
         .animation(.easeInOut(duration: 0.2), value: themeManager.currentTheme.id)
     }
@@ -61,74 +60,52 @@ struct TopBarView: View {
     private var titleArea: some View {
         HStack(spacing: 8) {
             Text("LAUncher")
-                .font(.headline)
-                .foregroundStyle(.primary)
-            Text("By: Mitchell Cohen")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(LauncherChrome.textMain(themeManager.currentTheme))
             if let component = session.currentComponent {
                 Text("• \(component.name)")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(LauncherChrome.textMuted(themeManager.currentTheme))
             } else {
                 Text("• No plugin loaded")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(LauncherChrome.textMuted(themeManager.currentTheme))
             }
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(LauncherChrome.glassBackground(themeManager.currentTheme, soft: true))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private var actionButtons: some View {
-        HStack(spacing: 12) {
-            Button {
-                session.refreshInstrumentList()
-                session.refreshPluginList()
-                session.isShowingPluginPicker = true
-            } label: {
-                Label("Load Plugin…", systemImage: "plus.square.on.square")
-            }
-            .buttonStyle(.borderedProminent)
+        toolbarButton(icon: "plus.square.on.square", label: "Plugin", isActive: session.currentComponent != nil) {
+            session.refreshInstrumentList()
+            session.refreshPluginList()
+            session.isShowingPluginPicker = true
         }
     }
 
     private var inspectorToggleButton: some View {
-        Group {
-            if session.isShowingInspector {
-                Button {
-                    session.isShowingInspector.toggle()
-                } label: {
-                    Image(systemName: "music.note")
-                }
-                .buttonStyle(.borderedProminent)
-                .help("Hide Inspector")
-            } else {
-                Button {
-                    session.isShowingInspector.toggle()
-                } label: {
-                    Image(systemName: "music.note")
-                }
-                .buttonStyle(.bordered)
-                .help("Show Inspector")
-            }
+        toolbarButton(icon: "sidebar.right", label: "Inspect", isActive: session.isShowingInspector) {
+            session.isShowingInspector.toggle()
         }
+        .help(session.isShowingInspector ? "Hide Inspector" : "Show Inspector")
     }
 
     private var helpButton: some View {
-        Button {
+        toolbarButton(icon: "questionmark.circle", label: "Help") {
             session.isShowingHelp = true
-        } label: {
-            Label("Help", systemImage: "questionmark.circle")
         }
-        .buttonStyle(.bordered)
         .help("Show help and information")
     }
 
     private var moreMenu: some View {
         Menu {
             Button("Rescan Plugins", systemImage: "arrow.clockwise") { session.rescanPlugins() }
+            Button("MCP Tools", systemImage: "wand.and.stars") { session.isShowingMCPTools = true }
             if session.currentComponent != nil {
                 Button("Unload Plugin", systemImage: "eject") { session.unloadCurrentInstrument() }
                 Divider()
                 Button("Export Parameters", systemImage: "doc.text") { session.exportParametersAsJSON() }
-                Button("MCP Tools", systemImage: "wand.and.stars") { session.isShowingMCPTools = true }
                 Button("MIDI Learn", systemImage: "keyboard") { session.isShowingMIDIMap = true }
                 Button("AI Chat", systemImage: "message.fill") { session.isShowingChat = true }
                 Divider()
@@ -169,8 +146,26 @@ struct TopBarView: View {
                 Button("Show QWERTY Piano", systemImage: "eye") { session.isMusicalTypingVisible = true }
             }
         } label: {
-            Label("More", systemImage: "ellipsis.circle")
+            toolbarLabel(icon: "ellipsis.circle", label: "More")
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(LauncherToolbarButtonStyle(theme: themeManager.currentTheme))
+    }
+
+    private func toolbarButton(icon: String, label: String, isActive: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            toolbarLabel(icon: icon, label: label)
+        }
+        .buttonStyle(LauncherToolbarButtonStyle(theme: themeManager.currentTheme, isActive: isActive))
+    }
+
+    private func toolbarLabel(icon: String, label: String) -> some View {
+        VStack(spacing: 2) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+            Text(label)
+                .font(.system(size: 10, weight: .semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
     }
 }

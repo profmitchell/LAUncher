@@ -202,7 +202,7 @@ struct MCPToolView: View {
                         .font(.subheadline)
                 }
                 
-                Text("The MCP server is configured in Cursor and uses mock data. It's ready to connect to your app via HTTP API.")
+                Text("The Node MCP server talks to LAUncher on port 5555. Run LAUncher with a plugin loaded so tools use live AU data (no mock fallback).")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

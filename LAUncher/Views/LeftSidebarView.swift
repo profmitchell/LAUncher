@@ -41,14 +41,18 @@ struct LeftSidebarView: View {
             component.manufacturerName.localizedCaseInsensitiveContains(pluginSearchText)
         }
     }
+
+    private var theme: AppTheme {
+        session.themeManager.currentTheme
+    }
     
     var body: some View {
         VStack(spacing: 0) {
             // Plugin controls
             VStack(alignment: .leading, spacing: 12) {
                 Text("Plugin")
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(LauncherChrome.textMain(theme))
                 
                 Button {
                     session.refreshInstrumentList()
@@ -58,7 +62,7 @@ struct LeftSidebarView: View {
                     Label("Load Plugin…", systemImage: "plus.square.on.square")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(LauncherPillButtonStyle(theme: theme, isProminent: true))
                 
                 if session.currentComponent != nil {
                     Button {
@@ -67,7 +71,7 @@ struct LeftSidebarView: View {
                         Label("Unload", systemImage: "eject")
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(LauncherPillButtonStyle(theme: theme))
                 }
             }
             .padding(16)
@@ -77,8 +81,8 @@ struct LeftSidebarView: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Text("Plugin Browser")
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(LauncherChrome.textMain(theme))
 
                     Spacer()
 
@@ -88,11 +92,22 @@ struct LeftSidebarView: View {
                         Image(systemName: "arrow.clockwise")
                     }
                     .buttonStyle(.borderless)
+                    .foregroundStyle(LauncherChrome.textMuted(theme))
                     .help("Rescan plugins")
                 }
 
-                TextField("Search plugins", text: $pluginSearchText)
-                    .textFieldStyle(.roundedBorder)
+                HStack(spacing: 7) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(LauncherChrome.textMuted(theme))
+                    TextField("Search plugins", text: $pluginSearchText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13))
+                        .foregroundStyle(LauncherChrome.textMain(theme))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .launcherPanel(theme: theme, cornerRadius: 8, shadowRadius: 3, shadowY: 1)
 
                 Picker("Plugin type", selection: $selectedScope) {
                     ForEach(SidebarPluginScope.allCases) { scope in
@@ -107,12 +122,13 @@ struct LeftSidebarView: View {
                         if filteredPlugins.isEmpty {
                             VStack(alignment: .leading, spacing: 6) {
                                 Image(systemName: "magnifyingglass")
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(LauncherChrome.textMuted(theme))
                                 Text(pluginSearchText.isEmpty ? "No plugins found" : "No matches")
                                     .font(.callout.weight(.medium))
+                                    .foregroundStyle(LauncherChrome.textMain(theme))
                                 Text(pluginSearchText.isEmpty ? "Try rescanning Audio Units." : "Change the search or filter.")
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(LauncherChrome.textMuted(theme))
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 18)
@@ -122,7 +138,8 @@ struct LeftSidebarView: View {
                                     component: component,
                                     isCurrent: session.currentComponent == component,
                                     isLoading: loadingComponent == component,
-                                    typeLabel: componentTypeLabel(component)
+                                    typeLabel: componentTypeLabel(component),
+                                    theme: theme
                                 ) {
                                     load(component)
                                 }
@@ -148,7 +165,7 @@ struct LeftSidebarView: View {
                     } label: {
                         Image(systemName: session.isTransportPlaying ? "pause.circle" : "play.circle.fill")
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(LauncherToolbarButtonStyle(theme: theme))
                     .help(session.isTransportPlaying ? "Pause" : "Play")
 
                     TextField("BPM", value: $session.bpm, format: .number)
@@ -170,7 +187,7 @@ struct LeftSidebarView: View {
                     } label: {
                         Text(session.engineState == .running ? "Stop" : "Start")
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(LauncherPillButtonStyle(theme: theme))
                     .help(engineStatusText)
                 }
             }
@@ -182,8 +199,8 @@ struct LeftSidebarView: View {
             // Quick actions
             VStack(alignment: .leading, spacing: 12) {
                 Text("Tools")
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(LauncherChrome.textMain(theme))
 
                 Button {
                     session.showPresetBrowser()
@@ -191,8 +208,17 @@ struct LeftSidebarView: View {
                     Label("Preset Browser", systemImage: "rectangle.stack")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.bordered)
-                
+                .buttonStyle(LauncherPillButtonStyle(theme: theme))
+
+                Button {
+                    session.isShowingMCPTools = true
+                } label: {
+                    Label("MCP Tools", systemImage: "wand.and.stars")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(LauncherPillButtonStyle(theme: theme))
+                .help("Model Context Protocol tools and server status (no plugin required)")
+
                 if session.currentComponent != nil {
                     Button {
                         session.isShowingMIDIMap = true
@@ -200,23 +226,15 @@ struct LeftSidebarView: View {
                         Label("MIDI Learn", systemImage: "keyboard")
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .buttonStyle(.bordered)
-                    
-                    Button {
-                        session.isShowingMCPTools = true
-                    } label: {
-                        Label("MCP Tools", systemImage: "wand.and.stars")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .buttonStyle(.bordered)
-                    
+                    .buttonStyle(LauncherPillButtonStyle(theme: theme))
+
                     Button {
                         session.isShowingChat = true
                     } label: {
                         Label("AI Chat", systemImage: "message.fill")
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(LauncherPillButtonStyle(theme: theme))
                 }
                 
                 Toggle(isOn: $session.isMusicalTypingEnabled) {
@@ -224,13 +242,15 @@ struct LeftSidebarView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .toggleStyle(.button)
+                .buttonStyle(LauncherPillButtonStyle(theme: theme, isProminent: session.isMusicalTypingEnabled))
             }
             .padding(16)
             
             Spacer()
         }
         .frame(minWidth: 220, idealWidth: 320, maxWidth: 420)
-        .background(.ultraThinMaterial)
+        .background(LauncherChrome.panel(theme))
+        .overlay(Rectangle().fill(LauncherChrome.border(theme)).frame(width: 1), alignment: .trailing)
     }
 
     private func load(_ component: AVAudioUnitComponent) {
@@ -284,6 +304,7 @@ private struct SidebarPluginRow: View {
     let isCurrent: Bool
     let isLoading: Bool
     let typeLabel: String
+    let theme: AppTheme
     let action: () -> Void
 
     var body: some View {
@@ -294,6 +315,7 @@ private struct SidebarPluginRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(component.name)
                         .font(.callout.weight(isCurrent ? .semibold : .regular))
+                        .foregroundStyle(LauncherChrome.textMain(theme))
                         .lineLimit(1)
 
                     HStack(spacing: 5) {
@@ -304,7 +326,7 @@ private struct SidebarPluginRow: View {
                             .lineLimit(1)
                     }
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(LauncherChrome.textMuted(theme))
                 }
 
                 Spacer(minLength: 6)
@@ -314,19 +336,14 @@ private struct SidebarPluginRow: View {
                         .controlSize(.small)
                 } else if isCurrent {
                     Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.tint)
+                        .foregroundStyle(LauncherChrome.accent(theme))
                 }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 7)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .background {
-                if isCurrent {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.accentColor.opacity(0.14))
-                }
-            }
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .launcherPanel(theme: theme, cornerRadius: 10, shadowRadius: 4, shadowY: 2, isActive: isCurrent)
         }
         .buttonStyle(.plain)
         .disabled(isLoading)
@@ -346,7 +363,7 @@ private struct SidebarPluginRow: View {
                 .overlay(
                     Image(systemName: systemImage)
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(LauncherChrome.textMuted(theme))
                 )
         }
     }

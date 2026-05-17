@@ -47,7 +47,7 @@ struct HelpView: View {
                     section(title: "MCP (Model Context Protocol)", icon: "wand.and.stars") {
                         VStack(alignment: .leading, spacing: 12) {
                             helpItem(title: "What is MCP?", description: "MCP enables AI-powered workflows for plugin control. The MCP server runs locally and exposes tools for parameter control and patch analysis.")
-                            helpItem(title: "Accessing MCP Tools", description: "Click 'MCP Tools' in the sidebar or 'More' menu to access AI-powered parameter control, patch analysis, and more.")
+                            helpItem(title: "Accessing MCP Tools", description: "Use Tools → MCP Tools in the left sidebar, or More → MCP Tools in the top bar. You can open it before loading a plugin to check server status; parameter randomization and similar actions need a loaded plugin.")
                             helpItem(title: "MCP Server", description: "The MCP server runs automatically on port 5555. See MCP-PRD.md for detailed API documentation.")
                         }
                     }
