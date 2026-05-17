@@ -33,9 +33,7 @@ final class PluginHostSession: ObservableObject {
     @Published var isShowingPluginPicker = false
     @Published var isMusicalTypingEnabled = false {
         didSet {
-            if !isMusicalTypingEnabled {
-                musicalTypingManager.releaseAllNotes()
-            }
+            musicalTypingManager.setKeyboardCaptureEnabled(isMusicalTypingEnabled)
         }
     }
     @Published var isMusicalTypingVisible = true

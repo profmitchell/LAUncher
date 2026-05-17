@@ -45,11 +45,6 @@ struct RootHostView: View {
                         .padding(.bottom, 12)
                 }
 
-                if session.isMusicalTypingEnabled {
-                    MusicalTypingKeyCaptureView(manager: session.musicalTypingManager, enabled: true)
-                        .frame(width: 0, height: 0)
-                }
-
                 RotationGestureCatcherView()
                     .frame(width: 0, height: 0)
             }
@@ -261,4 +256,3 @@ struct RootHostView: View {
         )
     }
 }
-

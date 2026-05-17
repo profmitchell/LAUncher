@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import AppKit
 
 @MainActor
 final class MusicalTypingManager: ObservableObject {
@@ -9,6 +10,8 @@ final class MusicalTypingManager: ObservableObject {
     @Published private(set) var activeNotes: Set<UInt8> = []
 
     private var activeKeys: [Character: UInt8] = [:]
+    private var keyDownMonitor: Any?
+    private var keyUpMonitor: Any?
 
     // Map QWERTY keys to semitone offsets in the Z-M row
     private let keyToSemitone: [Character: Int] = [
@@ -21,6 +24,15 @@ final class MusicalTypingManager: ObservableObject {
 
     var sendNoteOn: ((UInt8, UInt8) -> Void)?
     var sendNoteOff: ((UInt8) -> Void)?
+
+    deinit {
+        if let keyDownMonitor {
+            NSEvent.removeMonitor(keyDownMonitor)
+        }
+        if let keyUpMonitor {
+            NSEvent.removeMonitor(keyUpMonitor)
+        }
+    }
 
     private func currentBaseNote() -> Int {
         return 12 * baseOctave + transpose
@@ -70,5 +82,67 @@ final class MusicalTypingManager: ObservableObject {
             sendNoteOff?(note)
         }
     }
-}
 
+    func setKeyboardCaptureEnabled(_ enabled: Bool) {
+        if enabled {
+            installKeyboardMonitorIfNeeded()
+        } else {
+            removeKeyboardMonitor()
+            releaseAllNotes()
+        }
+    }
+
+    private func installKeyboardMonitorIfNeeded() {
+        guard keyDownMonitor == nil, keyUpMonitor == nil else { return }
+
+        keyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            return self.handle(event: event, isKeyDown: true)
+        }
+
+        keyUpMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyUp) { [weak self] event in
+            guard let self else { return event }
+            return self.handle(event: event, isKeyDown: false)
+        }
+    }
+
+    private func removeKeyboardMonitor() {
+        if let keyDownMonitor {
+            NSEvent.removeMonitor(keyDownMonitor)
+            self.keyDownMonitor = nil
+        }
+        if let keyUpMonitor {
+            NSEvent.removeMonitor(keyUpMonitor)
+            self.keyUpMonitor = nil
+        }
+    }
+
+    private func handle(event: NSEvent, isKeyDown: Bool) -> NSEvent? {
+        if event.modifierFlags.contains(.command) ||
+            event.modifierFlags.contains(.control) ||
+            event.modifierFlags.contains(.option) {
+            return event
+        }
+
+        guard let chars = event.charactersIgnoringModifiers,
+              let char = chars.first,
+              handles(char: char) else {
+            return event
+        }
+
+        if isKeyDown {
+            if !event.isARepeat {
+                handleKeyDown(char: char)
+            }
+        } else {
+            handleKeyUp(char: char)
+        }
+
+        return nil
+    }
+
+    private func handles(char: Character) -> Bool {
+        let c = Character(String(char).lowercased())
+        return keyToSemitone[c] != nil || c == "[" || c == "]"
+    }
+}
