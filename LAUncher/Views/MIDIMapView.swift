@@ -7,16 +7,46 @@ struct MIDIMapView: View {
     @State private var selectedParameter: AUParameter?
     @State private var searchText: String = ""
     @State private var mappingSearchText: String = ""
+    @State private var matrixSearchText: String = ""
+    @State private var selectedMode: MIDIMappingMode = .learn
+    @State private var selectedMatrixCC: UInt8 = 1
+    @State private var selectedMatrixParameterId: String = ""
+
+    private enum MIDIMappingMode: String, CaseIterable, Identifiable {
+        case learn = "Learn"
+        case matrix = "Matrix"
+
+        var id: String { rawValue }
+    }
     
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
-            content
+            Picker("View", selection: $selectedMode) {
+                ForEach(MIDIMappingMode.allCases) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            .padding(.vertical, 10)
+            Divider()
+            if selectedMode == .learn {
+                content
+            } else {
+                matrixContent
+            }
             Divider()
             footer
         }
-        .frame(minWidth: 700, minHeight: 500)
+        .frame(minWidth: 860, minHeight: 620)
+        .onAppear {
+            if selectedMatrixParameterId.isEmpty,
+               let firstParameter = session.getCurrentParameters()?.first {
+                selectedMatrixParameterId = firstParameter.identifier
+            }
+        }
     }
     
     private var header: some View {
@@ -152,6 +182,140 @@ struct MIDIMapView: View {
             .frame(maxWidth: .infinity)
         }
     }
+
+    private var matrixContent: some View {
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Mapping Matrix")
+                        .font(.headline)
+                    Spacer()
+                    if let last = session.midiMapManager.lastCCReceived {
+                        Button("Use Last CC \(last)") {
+                            selectedMatrixCC = last
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    TextField("Filter CC or parameter", text: $matrixSearchText)
+                        .textFieldStyle(.roundedBorder)
+
+                    Stepper("CC \(selectedMatrixCC)", value: Binding(
+                        get: { Int(selectedMatrixCC) },
+                        set: { selectedMatrixCC = UInt8(clamping: $0) }
+                    ), in: 0...127)
+                    .frame(width: 120)
+                }
+
+                HStack(spacing: 8) {
+                    Picker("Parameter", selection: $selectedMatrixParameterId) {
+                        if let params = session.getCurrentParameters() {
+                            ForEach(params, id: \.identifier) { param in
+                                Text(param.displayName).tag(param.identifier)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+
+                    Button {
+                        addMatrixMapping()
+                    } label: {
+                        Label("Map", systemImage: "plus.circle")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(selectedMatrixParameterId.isEmpty)
+                }
+
+                Divider()
+
+                ScrollView {
+                    LazyVStack(spacing: 8) {
+                        ForEach(filteredMatrixCCs, id: \.self) { cc in
+                            MatrixCCRow(
+                                ccNumber: UInt8(cc),
+                                mappings: session.midiMapManager.mappings(forCC: UInt8(cc)),
+                                parameterLookup: { session.findParameter(identifier: $0) },
+                                isSelected: selectedMatrixCC == UInt8(cc),
+                                onSelect: { selectedMatrixCC = UInt8(cc) },
+                                onRemove: { mapping in session.midiMapManager.removeMapping(mapping) },
+                                onClear: { session.midiMapManager.removeMappings(forCC: UInt8(cc)) }
+                            )
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+            .padding()
+            .frame(minWidth: 560, maxWidth: .infinity)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Learn Status")
+                    .font(.headline)
+
+                statusLine(
+                    title: "Last CC",
+                    value: session.midiMapManager.lastCCReceived.map { "CC \($0)" } ?? "None"
+                )
+                statusLine(
+                    title: "Pending",
+                    value: session.midiMapManager.pendingCCForLearnMode.map { "CC \($0)" } ?? "None"
+                )
+                statusLine(
+                    title: "Mappings",
+                    value: "\(session.midiMapManager.mappings.count)"
+                )
+
+                Divider()
+
+                Text("Matrix rows are MIDI CC numbers. Each chip is a plugin parameter currently mapped to that CC. Select a row, choose a parameter, then Map.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer()
+            }
+            .padding()
+            .frame(width: 240)
+        }
+    }
+
+    private var filteredMatrixCCs: [Int] {
+        let allCCs = Array(0...127)
+        guard !matrixSearchText.isEmpty else { return allCCs }
+        let lower = matrixSearchText.lowercased()
+        return allCCs.filter { cc in
+            String(cc).contains(lower) ||
+            session.midiMapManager.mappings(forCC: UInt8(cc)).contains { mapping in
+                mapping.parameterDisplayName.lowercased().contains(lower) ||
+                mapping.parameterId.lowercased().contains(lower)
+            }
+        }
+    }
+
+    private func addMatrixMapping() {
+        guard let param = session.findParameter(identifier: selectedMatrixParameterId) else { return }
+        session.midiMapManager.createMapping(
+            parameterId: param.identifier,
+            parameterDisplayName: param.displayName,
+            ccNumber: selectedMatrixCC,
+            minValue: param.minValue,
+            maxValue: param.maxValue
+        )
+    }
+
+    private func statusLine(title: String, value: String) -> some View {
+        HStack {
+            Text(title)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .font(.caption.monospaced())
+        }
+    }
     
     private func filteredParameters(_ params: [AUParameter]) -> [AUParameter] {
         if searchText.isEmpty {
@@ -181,10 +345,6 @@ struct MIDIMapView: View {
             // Learn Mode Toggle
             Button {
                 session.midiMapManager.toggleLearnMode()
-                if session.midiMapManager.isInLearnMode {
-                    // Close the MIDI map view - user can now click directly on plugin UI
-                    dismiss()
-                }
             } label: {
                 HStack {
                     Circle()
@@ -391,3 +551,134 @@ struct MappingRow: View {
     }
 }
 
+private struct MatrixCCRow: View {
+    let ccNumber: UInt8
+    let mappings: [MIDIMapping]
+    let parameterLookup: (String) -> AUParameter?
+    let isSelected: Bool
+    let onSelect: () -> Void
+    let onRemove: (MIDIMapping) -> Void
+    let onClear: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Button(action: onSelect) {
+                VStack(spacing: 2) {
+                    Text("CC")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("\(ccNumber)")
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                }
+                .frame(width: 52, height: 46)
+                .background(isSelected ? Color.accentColor.opacity(0.18) : Color(NSColor.controlBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.15), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+
+            if mappings.isEmpty {
+                Text("No mappings")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 15)
+            } else {
+                FlowLayout(spacing: 6) {
+                    ForEach(mappings) { mapping in
+                        MatrixMappingChip(
+                            title: parameterLookup(mapping.parameterId)?.displayName ?? mapping.parameterDisplayName,
+                            subtitle: mapping.parameterId,
+                            onRemove: { onRemove(mapping) }
+                        )
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Button(role: .destructive, action: onClear) {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.plain)
+                .help("Clear all CC \(ccNumber) mappings")
+            }
+        }
+        .padding(10)
+        .background(Color(NSColor.controlBackgroundColor).opacity(isSelected ? 0.75 : 0.45))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+private struct MatrixMappingChip: View {
+    let title: String
+    let subtitle: String
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title.isEmpty ? subtitle : title)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Button(action: onRemove) {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Color.accentColor.opacity(0.13))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 360
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > width {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+
+        return CGSize(width: width, height: y + rowHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var rowHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > bounds.minX, x + size.width > bounds.maxX {
+                x = bounds.minX
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+    }
+}

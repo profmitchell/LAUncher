@@ -6,6 +6,12 @@ A Model Context Protocol (MCP) server that provides AI-powered tools for control
 
 The LAUncher MCP server enables AI assistants and other tools to interact with your synth plugins through a standardized JSON-RPC 2.0 interface. It exposes tools for parameter control, patch snapshots, musical analysis, and more.
 
+## How to run
+
+1. **Run the LAUncher macOS app** and **load a plugin** — that starts the **HTTP API on port 5555** (no separate terminal server). Check: `curl -sS http://127.0.0.1:5555/health` → should print `OK`.
+2. **Configure Cursor** with `node` + absolute path to [`mcp/launcher-server.js`](mcp/launcher-server.js) in `~/.cursor/mcp.json`. Cursor **spawns** that Node process; you do not leave it running in Terminal for day-to-day use.
+3. **Optional Terminal smoke test:** step-by-step commands are in [mcp/README.md](mcp/README.md) under **How to run (read this first)**.
+
 ## Features
 
 - **Parameter Control** - Get and set plugin parameters programmatically

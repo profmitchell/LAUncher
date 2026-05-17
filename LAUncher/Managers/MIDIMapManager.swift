@@ -38,11 +38,11 @@ final class MIDIMapManager: ObservableObject {
         
         if (status & 0xF0) == ccStatus {
             let ccNumber = event.data1
-            let ccValue = event.data2
             
             // Handle learn mode: store CC and wait for parameter interaction
-            if isInLearnMode && pendingCCForLearnMode == nil {
+            if isInLearnMode {
                 pendingCCForLearnMode = ccNumber
+                lastCCReceived = ccNumber
                 print("🎹 Learn Mode: Received CC \(ccNumber). Now interact with a parameter to map it.")
                 return false // Don't apply yet
             }
@@ -56,22 +56,15 @@ final class MIDIMapManager: ObservableObject {
                     minValue: 0.0,
                     maxValue: 127.0
                 )
-                mappings.append(mapping)
+                upsertMapping(mapping)
                 isLearning = false
                 learningParameterId = nil
                 lastCCReceived = ccNumber
-                saveMappings()
                 return true // Handled
             }
             
             // Apply existing mappings
-            if let mapping = mappings.first(where: { $0.ccNumber == ccNumber }) {
-                // Convert MIDI CC (0-127) to parameter value (0.0-1.0)
-                let normalizedValue = Float(ccValue) / 127.0
-                let paramValue = mapping.minValue + (normalizedValue * (mapping.maxValue - mapping.minValue))
-                
-                // Return true to indicate we handled this, but the actual parameter setting
-                // will be done by PluginHostSession
+            if mappings.contains(where: { $0.ccNumber == ccNumber }) {
                 return false // Let PluginHostSession handle parameter setting
             }
         }
@@ -89,9 +82,8 @@ final class MIDIMapManager: ObservableObject {
                 minValue: minValue,
                 maxValue: maxValue
             )
-            mappings.append(mapping)
+            upsertMapping(mapping)
             pendingCCForLearnMode = nil
-            saveMappings()
             print("✅ Learn Mode: Mapped \(parameterDisplayName) to CC \(ccNumber)")
         }
     }
@@ -104,12 +96,6 @@ final class MIDIMapManager: ObservableObject {
     }
     
     func createMapping(parameterId: String, parameterDisplayName: String, ccNumber: UInt8, minValue: Float, maxValue: Float) {
-        // Check if mapping already exists
-        if mappings.contains(where: { $0.parameterId == parameterId && $0.ccNumber == ccNumber }) {
-            print("⚠️ Mapping already exists for \(parameterDisplayName) to CC \(ccNumber)")
-            return
-        }
-        
         let mapping = MIDIMapping(
             parameterId: parameterId,
             parameterDisplayName: parameterDisplayName,
@@ -117,9 +103,22 @@ final class MIDIMapManager: ObservableObject {
             minValue: minValue,
             maxValue: maxValue
         )
-        mappings.append(mapping)
-        saveMappings()
+        upsertMapping(mapping)
         print("✅ Created mapping: \(parameterDisplayName) → CC \(ccNumber)")
+    }
+
+    func completeLearning(ccNumber: UInt8, parameter: AUParameter) {
+        createMapping(
+            parameterId: parameter.identifier,
+            parameterDisplayName: parameter.displayName,
+            ccNumber: ccNumber,
+            minValue: parameter.minValue,
+            maxValue: parameter.maxValue
+        )
+        isLearning = false
+        learningParameterId = nil
+        pendingCCForLearnMode = nil
+        lastCCReceived = ccNumber
     }
     
     func createMappingsForCC(ccNumber: UInt8, parameterIds: [(id: String, displayName: String, minValue: Float, maxValue: Float)]) {
@@ -146,12 +145,15 @@ final class MIDIMapManager: ObservableObject {
     func startLearning(parameterId: String) {
         isLearning = true
         learningParameterId = parameterId
+        isInLearnMode = false
+        pendingCCForLearnMode = nil
         lastCCReceived = nil
     }
     
     func cancelLearning() {
         isLearning = false
         learningParameterId = nil
+        pendingCCForLearnMode = nil
         lastCCReceived = nil
     }
     
@@ -171,6 +173,32 @@ final class MIDIMapManager: ObservableObject {
             )
             saveMappings()
         }
+    }
+
+    func mappings(forCC ccNumber: UInt8) -> [MIDIMapping] {
+        mappings
+            .filter { $0.ccNumber == ccNumber }
+            .sorted { $0.parameterDisplayName.localizedCaseInsensitiveCompare($1.parameterDisplayName) == .orderedAscending }
+    }
+
+    func removeMappings(forCC ccNumber: UInt8) {
+        mappings.removeAll { $0.ccNumber == ccNumber }
+        saveMappings()
+    }
+
+    private func upsertMapping(_ mapping: MIDIMapping) {
+        if let index = mappings.firstIndex(where: { $0.id == mapping.id }) {
+            mappings[index] = mapping
+        } else {
+            mappings.append(mapping)
+        }
+        mappings.sort {
+            if $0.ccNumber == $1.ccNumber {
+                return $0.parameterDisplayName.localizedCaseInsensitiveCompare($1.parameterDisplayName) == .orderedAscending
+            }
+            return $0.ccNumber < $1.ccNumber
+        }
+        saveMappings()
     }
     
     private func saveMappings() {
@@ -203,4 +231,3 @@ final class MIDIMapManager: ObservableObject {
             .appendingPathComponent("midi_mappings.json")
     }
 }
-

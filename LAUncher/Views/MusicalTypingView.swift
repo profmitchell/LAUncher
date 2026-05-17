@@ -44,6 +44,18 @@ struct MusicalTypingView: View {
                 Divider()
                     .frame(height: 20)
 
+                Button {
+                    manager.toggleLatchSustain()
+                } label: {
+                    Label("Latch", systemImage: manager.isLatchSustainEnabled ? "pin.fill" : "pin")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(manager.isLatchSustainEnabled ? .green : .gray)
+                .help("Toggle latch sustain (Tab)")
+
+                Divider()
+                    .frame(height: 20)
+
                 Label("Velocity", systemImage: "speaker.wave.2")
                     .font(.caption)
                     .foregroundStyle(.secondary)

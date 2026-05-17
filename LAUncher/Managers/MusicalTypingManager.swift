@@ -7,9 +7,11 @@ final class MusicalTypingManager: ObservableObject {
     @Published var baseOctave: Int = 4
     @Published var transpose: Int = 0
     @Published var velocity: UInt8 = 100
+    @Published var isLatchSustainEnabled = false
     @Published private(set) var activeNotes: Set<UInt8> = []
 
     private var activeKeys: [Character: UInt8] = [:]
+    private var latchedNotes: Set<UInt8> = []
     private var keyDownMonitor: Any?
     private var keyUpMonitor: Any?
 
@@ -52,15 +54,40 @@ final class MusicalTypingManager: ObservableObject {
         if activeKeys[c] != nil { return } // ignore repeats
         let note = UInt8(currentBaseNote() + semitone)
         activeKeys[c] = note
+        let wasAlreadyActive = activeNotes.contains(note)
         activeNotes.insert(note)
-        sendNoteOn?(note, velocity)
+        latchedNotes.remove(note)
+        if !wasAlreadyActive {
+            sendNoteOn?(note, velocity)
+        }
     }
 
     func handleKeyUp(char: Character) {
         let c = Character(String(char).lowercased())
         guard let note = activeKeys.removeValue(forKey: c) else { return }
-        activeNotes.remove(note)
-        sendNoteOff?(note)
+        if isLatchSustainEnabled {
+            latchedNotes.insert(note)
+        } else {
+            activeNotes.remove(note)
+            sendNoteOff?(note)
+        }
+    }
+
+    func toggleLatchSustain() {
+        isLatchSustainEnabled.toggle()
+        if !isLatchSustainEnabled {
+            releaseLatchedNotes()
+        }
+    }
+
+    private func releaseLatchedNotes() {
+        let notesToRelease = latchedNotes
+        latchedNotes.removeAll()
+        for note in notesToRelease {
+            guard !activeKeys.values.contains(note) else { continue }
+            activeNotes.remove(note)
+            sendNoteOff?(note)
+        }
     }
 
     func playPreview(note: UInt8) {
@@ -77,7 +104,9 @@ final class MusicalTypingManager: ObservableObject {
     func releaseAllNotes() {
         let notes = Set(activeKeys.values).union(activeNotes)
         activeKeys.removeAll()
+        latchedNotes.removeAll()
         activeNotes.removeAll()
+        isLatchSustainEnabled = false
         for note in notes {
             sendNoteOff?(note)
         }
@@ -122,6 +151,13 @@ final class MusicalTypingManager: ObservableObject {
             event.modifierFlags.contains(.control) ||
             event.modifierFlags.contains(.option) {
             return event
+        }
+
+        if event.keyCode == 48 {
+            if isKeyDown, !event.isARepeat {
+                toggleLatchSustain()
+            }
+            return nil
         }
 
         guard let chars = event.charactersIgnoringModifiers,

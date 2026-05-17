@@ -26,13 +26,14 @@ final class MCPServerManager: ObservableObject {
         let listener = SocketListener(port: port, session: session!)
         try listener.start()
         self.listener = listener
-        
-        // Start server on background thread
+
+        isRunning = true
+
+        // Keep run loop alive (must set isRunning before scheduling so the first tick sees true)
         serverTask = Task.detached(priority: .background) { [weak self] in
             await self?.runServer()
         }
-        
-        isRunning = true
+
         print("✅ MCP HTTP Server started on port \(port)")
     }
     
@@ -174,23 +175,39 @@ private class SocketListener {
         
         guard let requestString = String(bytes: buffer.prefix(totalRead), encoding: .utf8) else { return }
         
-        let response = await handleRequest(requestString)
-        
-        let responseData = response.data(using: .utf8) ?? Data()
-        _ = responseData.withUnsafeBytes { bytes in
-            send(clientSocket, bytes.baseAddress, responseData.count, 0)
+        let responseData = await handleRequest(requestString)
+
+        // send() often returns before the whole buffer is written; large JSON (get_parameters)
+        // would truncate and clients see "socket hang up". Block and loop until drained.
+        let cleared = fcntl(clientSocket, F_GETFL, 0)
+        _ = fcntl(clientSocket, F_SETFL, cleared & ~O_NONBLOCK)
+
+        responseData.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+            guard let base = raw.baseAddress else { return }
+            var offset = 0
+            let total = responseData.count
+            while offset < total {
+                let written = send(clientSocket, base.advanced(by: offset), total - offset, 0)
+                if written > 0 {
+                    offset += written
+                } else if written < 0, errno == EINTR {
+                    continue
+                } else {
+                    break
+                }
+            }
         }
     }
     
-    private func handleRequest(_ request: String) async -> String {
+    private func handleRequest(_ request: String) async -> Data {
         let lines = request.components(separatedBy: "\r\n")
         guard let firstLine = lines.first else {
-            return httpResponse(status: "400 Bad Request", body: "Invalid request")
+            return httpPlainResponse(status: "400 Bad Request", body: "Invalid request")
         }
         
         let components = firstLine.components(separatedBy: " ")
         guard components.count >= 3 else {
-            return httpResponse(status: "400 Bad Request", body: "Invalid request line")
+            return httpPlainResponse(status: "400 Bad Request", body: "Invalid request line")
         }
         
         let method = components[0]
@@ -208,149 +225,169 @@ private class SocketListener {
         
         // Route requests
         if method == "POST" && path == "/api/get_parameters" {
-            return handleGetParameters(jsonBody)
+            return await handleGetParameters(jsonBody)
         } else if method == "POST" && path == "/api/set_parameters" {
             return await handleSetParameters(jsonBody)
         } else if method == "POST" && path == "/api/randomize_parameters" {
             return await handleRandomizeParameters(jsonBody)
+        } else if method == "POST" && path == "/api/analyze_patch" {
+            return await handleAnalyzePatch(jsonBody)
         } else if method == "POST" && path == "/api/create_midi_mapping" {
             return await handleCreateMIDIMapping(jsonBody)
         } else if method == "POST" && path == "/api/chat" {
             return await handleChat(jsonBody)
         } else if method == "GET" && path == "/health" {
-            return httpResponse(status: "200 OK", body: "OK")
+            return httpPlainResponse(status: "200 OK", body: "OK")
         } else {
-            return httpResponse(status: "404 Not Found", body: "Not Found")
+            return httpPlainResponse(status: "404 Not Found", body: "Not Found")
         }
     }
     
-    private func handleGetParameters(_ body: [String: Any]?) -> String {
-        guard let session = session,
-              let params = session.getCurrentParameters() else {
+    private func handleGetParameters(_ body: [String: Any]?) async -> Data {
+        await MainActor.run { [weak session] in
+            guard let session,
+                  let params = session.getCurrentParameters() else {
+                return jsonResponse([
+                    "plugin": "Unknown",
+                    "parameters": [],
+                ])
+            }
+
+            let mcpParams = params.map { param -> [String: Any] in
+                [
+                    "id": param.identifier,
+                    "path": param.displayName,
+                    "address": param.address,
+                    "displayName": param.displayName,
+                    "min": Double(param.minValue),
+                    "max": Double(param.maxValue),
+                    "unit": "",
+                    "value": Double(param.value),
+                ]
+            }
+
             return jsonResponse([
-                "plugin": "Unknown",
-                "parameters": []
+                "plugin": session.currentComponent?.name ?? "Unknown",
+                "parameters": mcpParams,
             ])
         }
-        
-        let mcpParams = params.map { param -> [String: Any] in
-            [
-                "id": param.identifier,
-                "path": param.displayName,
-                "address": param.address,
-                "displayName": param.displayName,
-                "min": Double(param.minValue),
-                "max": Double(param.maxValue),
-                "unit": "",
-                "value": Double(param.value)
-            ]
-        }
-        
-        return jsonResponse([
-            "plugin": session.currentComponent?.name ?? "Unknown",
-            "parameters": mcpParams
-        ])
     }
     
-    private func handleSetParameters(_ body: [String: Any]?) async -> String {
-        guard let session = session,
-              let changes = body?["changes"] as? [[String: Any]] else {
+    private func handleSetParameters(_ body: [String: Any]?) async -> Data {
+        guard let changes = body?["changes"] as? [[String: Any]] else {
             return jsonResponse(["result": "error", "message": "No changes provided"])
         }
-        
-        var applied: [[String: Any]] = []
-        
-        for change in changes {
-            guard let id = change["id"] as? String,
-                  let value = change["value"] as? Double else {
-                continue
+        return await MainActor.run { [weak session] in
+            guard let session else {
+                return jsonResponse(["result": "error", "message": "No session"])
             }
-            
-            // Try to find parameter by identifier or display name
-            if session.setParameterValue(identifier: id, value: value) ||
-               session.setParameterValue(displayName: id, value: value) {
-                applied.append(["id": id, "value": value])
+            var applied: [[String: Any]] = []
+            for change in changes {
+                guard let id = change["id"] as? String,
+                      let value = change["value"] as? Double else {
+                    continue
+                }
+                if session.setParameterValue(identifier: id, value: value)
+                    || session.setParameterValue(displayName: id, value: value) {
+                    applied.append(["id": id, "value": value])
+                }
             }
-        }
-        
-        return jsonResponse([
-            "result": "ok",
-            "applied": applied
-        ])
-    }
-    
-    private func handleRandomizeParameters(_ body: [String: Any]?) async -> String {
-        guard let session = session else {
-            return jsonResponse(["result": "error", "message": "No session"])
-        }
-        
-        let intensity = (body?["intensity"] as? Double) ?? 0.4
-        let preserveCategories = (body?["preserveCategories"] as? [String]) ?? []
-        
-        do {
-            let result = try await session.randomizeParameters(
-                intensity: intensity,
-                preserveCategories: preserveCategories
-            )
-            
             return jsonResponse([
                 "result": "ok",
-                "intensity": result.intensity,
-                "randomizedCount": result.randomizedCount
-            ])
-        } catch {
-            return jsonResponse([
-                "result": "error",
-                "message": error.localizedDescription
+                "applied": applied,
             ])
         }
     }
-    
-    private func handleCreateMIDIMapping(_ body: [String: Any]?) async -> String {
-        guard let session = session,
-              let ccNumber = body?["ccNumber"] as? Int,
+
+    private func handleAnalyzePatch(_ body: [String: Any]?) async -> Data {
+        _ = body
+        return await Task { @MainActor [weak session] in
+            guard let session else {
+                return jsonResponse(["result": "error", "message": "No session"])
+            }
+            do {
+                let analysis = try await session.exportPatchAnalysisContext()
+                return jsonResponse(["result": "ok", "analysis": analysis])
+            } catch {
+                return jsonResponse(["result": "error", "message": error.localizedDescription])
+            }
+        }.value
+    }
+
+    private func handleRandomizeParameters(_ body: [String: Any]?) async -> Data {
+        let intensity = (body?["intensity"] as? Double) ?? 0.4
+        let preserveCategories = (body?["preserveCategories"] as? [String]) ?? []
+        return await Task { @MainActor [weak session] in
+            guard let session else {
+                return jsonResponse(["result": "error", "message": "No session"])
+            }
+            do {
+                let result = try await session.randomizeParameters(
+                    intensity: intensity,
+                    preserveCategories: preserveCategories
+                )
+                return jsonResponse([
+                    "result": "ok",
+                    "intensity": result.intensity,
+                    "randomizedCount": result.randomizedCount,
+                ])
+            } catch {
+                return jsonResponse([
+                    "result": "error",
+                    "message": error.localizedDescription,
+                ])
+            }
+        }.value
+    }
+
+    private func handleCreateMIDIMapping(_ body: [String: Any]?) async -> Data {
+        guard let ccNumber = body?["ccNumber"] as? Int,
               let parameterIds = body?["parameterIds"] as? [String] else {
             return jsonResponse(["result": "error", "message": "Missing ccNumber or parameterIds"])
         }
-        
-        var created: [[String: Any]] = []
-        
-        for paramId in parameterIds {
-            guard let param = session.findParameter(identifier: paramId) else {
-                continue
+        return await MainActor.run { [weak session] in
+            guard let session else {
+                return jsonResponse(["result": "error", "message": "No session"])
             }
-            
-            session.midiMapManager.createMapping(
-                parameterId: paramId,
-                parameterDisplayName: param.displayName,
-                ccNumber: UInt8(ccNumber),
-                minValue: param.minValue,
-                maxValue: param.maxValue
-            )
-            
-            created.append([
-                "parameterId": paramId,
-                "displayName": param.displayName,
-                "ccNumber": ccNumber
+            var created: [[String: Any]] = []
+            for paramId in parameterIds {
+                guard let param = session.findParameter(identifier: paramId) else {
+                    continue
+                }
+                session.midiMapManager.createMapping(
+                    parameterId: paramId,
+                    parameterDisplayName: param.displayName,
+                    ccNumber: UInt8(ccNumber),
+                    minValue: param.minValue,
+                    maxValue: param.maxValue
+                )
+                created.append([
+                    "parameterId": paramId,
+                    "displayName": param.displayName,
+                    "ccNumber": ccNumber,
+                ])
+            }
+            return jsonResponse([
+                "result": "ok",
+                "created": created,
             ])
         }
-        
-        return jsonResponse([
-            "result": "ok",
-            "created": created
-        ])
     }
     
-    private func handleChat(_ body: [String: Any]?) async -> String {
-        guard let session = session,
-              let message = body?["message"] as? String else {
+    private func handleChat(_ body: [String: Any]?) async -> Data {
+        guard let message = body?["message"] as? String else {
             return jsonResponse(["response": "I need a message to respond to."])
         }
-        
-        let lowerMessage = message.lowercased()
-        var response = ""
-        
-        // Parse natural language commands
+        return await withCheckedContinuation { (continuation: CheckedContinuation<Data, Never>) in
+            Task { @MainActor [weak self, weak session] in
+                guard let self, let session else {
+                    continuation.resume(returning: jsonResponse(["response": "Session unavailable."]))
+                    return
+                }
+                let lowerMessage = message.lowercased()
+                var response = ""
+
+                // Parse natural language commands
         if lowerMessage.contains("set") || lowerMessage.contains("change") {
             // Parameter setting commands
             if lowerMessage.contains("filter") && lowerMessage.contains("cutoff") {
@@ -407,7 +444,7 @@ private class SocketListener {
                     // Check if they want internal modulation (Vital's mod matrix) vs MIDI CC mapping
                     if lowerMessage.contains("source") || lowerMessage.contains("in vital") || lowerMessage.contains("modulation") || lowerMessage.contains("matrix") {
                         // Internal modulation routing in Vital/Serum
-                        response = await setupModwheelModulation(session: session, targetOscillators: [1, 2, 3])
+                        response = await self.setupModwheelModulation(session: session, targetOscillators: [1, 2, 3])
                     } else {
                         // MIDI CC mapping (existing behavior)
                         let oscIds = session.analyzedParameters?.oscillatorLevelIds ?? ["50797", "51513", "52503"] // Fallback to Vital IDs
@@ -482,9 +519,11 @@ private class SocketListener {
             response = "I can help you control your synth! Try:\n• \"Set filter cutoff to 2000\"\n• \"Map modwheel to all oscillators\"\n• \"Randomize parameters\"\n• \"Show oscillator levels\"\n\nOr say \"help\" for more options!"
         }
         
-        return jsonResponse(["response": response])
+                continuation.resume(returning: jsonResponse(["response": response]))
+            }
+        }
     }
-    
+
     private func extractNumbers(from text: String) -> [Double] {
         let numbers = text.components(separatedBy: CharacterSet.decimalDigits.inverted)
             .compactMap { Double($0) }
@@ -628,24 +667,31 @@ private class SocketListener {
         }
     }
     
-    private func httpResponse(status: String, body: String) -> String {
-        let contentLength = body.utf8.count
-        return """
-        HTTP/1.1 \(status)
-        Content-Type: application/json
-        Content-Length: \(contentLength)
-        Access-Control-Allow-Origin: *
-        
-        \(body)
-        """
+    /// Full HTTP message as bytes. `Content-Length` must match the exact body byte count (large `get_parameters` JSON).
+    private func httpResponseData(status: String, contentType: String, body: Data) -> Data {
+        let header =
+            "HTTP/1.1 \(status)\r\n" +
+            "Content-Type: \(contentType)\r\n" +
+            "Content-Length: \(body.count)\r\n" +
+            "Connection: close\r\n" +
+            "Access-Control-Allow-Origin: *\r\n" +
+            "\r\n"
+        var out = Data(header.utf8)
+        out.append(body)
+        return out
     }
-    
-    private func jsonResponse(_ data: [String: Any]) -> String {
-        guard let jsonData = try? JSONSerialization.data(withJSONObject: data, options: []),
-              let jsonString = String(data: jsonData, encoding: .utf8) else {
-            return httpResponse(status: "500 Internal Server Error", body: "{\"error\":\"Failed to serialize\"}")
+
+    private func httpPlainResponse(status: String, body: String) -> Data {
+        let b = body.data(using: .utf8) ?? Data()
+        return httpResponseData(status: status, contentType: "text/plain; charset=utf-8", body: b)
+    }
+
+    private func jsonResponse(_ data: [String: Any]) -> Data {
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: data, options: []) else {
+            let err = #"{"error":"Failed to serialize"}"#.data(using: .utf8) ?? Data()
+            return httpResponseData(status: "500 Internal Server Error", contentType: "application/json", body: err)
         }
-        return httpResponse(status: "200 OK", body: jsonString)
+        return httpResponseData(status: "200 OK", contentType: "application/json", body: jsonData)
     }
     
     func stop() {

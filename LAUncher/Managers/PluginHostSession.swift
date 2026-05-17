@@ -131,7 +131,11 @@ final class PluginHostSession: ObservableObject {
                 }
                 let server = MCPServerManager(session: self)
                 self.mcpServer = server
-                try? server.start()
+                do {
+                    try server.start()
+                } catch {
+                    print("❌ MCP HTTP server failed to start: \(error.localizedDescription)")
+                }
             }
         }
         // Wire musical typing to send virtual notes
@@ -567,19 +571,8 @@ final class PluginHostSession: ObservableObject {
                 
                 // Check if we're learning
                 if midiMapManager.isLearning, let paramId = midiMapManager.learningParameterId {
-                    // Create new mapping
                     if let param = self.findParameter(identifier: paramId) {
-                        let mapping = MIDIMapping(
-                            parameterId: paramId,
-                            parameterDisplayName: param.displayName,
-                            ccNumber: ccNumber,
-                            minValue: param.minValue,
-                            maxValue: param.maxValue
-                        )
-                        midiMapManager.mappings.append(mapping)
-                        midiMapManager.isLearning = false
-                        midiMapManager.learningParameterId = nil
-                        midiMapManager.lastCCReceived = ccNumber
+                        midiMapManager.completeLearning(ccNumber: ccNumber, parameter: param)
                         return // Handled
                     }
                 }
@@ -925,6 +918,19 @@ final class PluginHostSession: ObservableObject {
     func getFilterCutoff() -> AUParameter? {
         return findParameter(displayName: "cutoff") ?? findParameter(identifier: "filter_cutoff")
     }
+
+    /// Serum and similar hosts expose MIDI CC / channel rows as normal AU parameters (e.g. `CC113 Chan 14`).
+    /// Randomizing those only perturbs MIDI-learn slots, not the synth timbre, so we skip them by default.
+    private func shouldSkipMIDIAssignableSlotParameter(_ param: AUParameter) -> Bool {
+        let lowered = param.displayName.lowercased()
+        if lowered.range(of: #"\bcc\s*\d+\s+chan\b"#, options: .regularExpression) != nil {
+            return true
+        }
+        if lowered.contains("midi cc"), lowered.contains(" chan") {
+            return true
+        }
+        return false
+    }
     
     func randomizeParameters(intensity: Double = 0.4, preserveCategories: [String] = [], excludeIds: [String] = []) async throws -> (randomizedCount: Int, intensity: Double) {
         guard let audioUnit = engineManager.auAudioUnit,
@@ -952,6 +958,10 @@ final class PluginHostSession: ObservableObject {
                 }
             }
             if shouldPreserve {
+                continue
+            }
+
+            if shouldSkipMIDIAssignableSlotParameter(param) {
                 continue
             }
             
@@ -1105,9 +1115,72 @@ final class PluginHostSession: ObservableObject {
         
         return (summary, (brightness, warmth, roughness, space))
     }
+
+    /// Refreshes `analyzedParameters` (osc / filter / mod-matrix routing used by MCP chat), runs `analyzePatch()` for a short text summary, and returns a **compact** JSON-friendly snapshot (not the full AU tree).
+    func exportPatchAnalysisContext() async throws -> [String: Any] {
+        await analyzeParameters()
+        let (summary, timbre) = try await analyzePatch()
+        let pluginName = currentComponent?.name ?? "Unknown"
+
+        var routing: [String: Any] = [:]
+        if let a = analyzedParameters {
+            routing = [
+                "detectedPluginType": a.pluginType,
+                "oscillatorLevelParameterIds": a.oscillatorLevelIds,
+                "filterCutoffParameterIds": a.filterCutoffIds,
+                "modulationMatrixSlotCount": a.modulationMatrixSlots.count,
+            ]
+        }
+
+        let highlightSubstrings = [
+            "main vol", "master", "master vol", "cutoff", "resonance", "attack", "decay", "sustain", "release",
+            "oscillator", "wavetable", "filter", "envelope", "lfo", "reverb", "delay", "drive", "distortion",
+            "unison", "detune", "noise", "sub osc", "poly", "glide", "porta",
+        ]
+        var candidates: [[String: Any]] = []
+        if let params = getCurrentParameters() {
+            for p in params {
+                let dn = p.displayName.lowercased()
+                if highlightSubstrings.contains(where: { dn.contains($0) }) {
+                    candidates.append([
+                        "id": p.identifier,
+                        "displayName": p.displayName,
+                        "value": Double(p.value),
+                        "min": Double(p.minValue),
+                        "max": Double(p.maxValue),
+                    ])
+                }
+            }
+        }
+        candidates.sort {
+            let a = $0["displayName"] as? String ?? ""
+            let b = $1["displayName"] as? String ?? ""
+            return a.localizedCaseInsensitiveCompare(b) == .orderedAscending
+        }
+        let highlights = Array(candidates.prefix(80))
+
+        var payload: [String: Any] = [
+            "plugin": pluginName,
+            "summary": summary,
+            "timbre": [
+                "brightness": timbre.brightness,
+                "warmth": timbre.warmth,
+                "roughness": timbre.roughness,
+                "space": timbre.space,
+            ],
+            "routing": routing,
+            "highlights": highlights,
+            "highlightCount": highlights.count,
+            "totalParameterCount": getCurrentParameters()?.count ?? 0,
+        ]
+        if let preset = currentPresetName {
+            payload["presetName"] = preset
+        }
+        return payload
+    }
     
     func sendChatMessage(_ message: String) async throws -> String {
-        guard let url = URL(string: "http://localhost:5555/api/chat") else {
+        guard let url = URL(string: "http://127.0.0.1:5555/api/chat") else {
             throw NSError(domain: "PluginHostSession", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid URL"])
         }
         
@@ -1149,7 +1222,6 @@ final class PluginHostSession: ObservableObject {
         // Find oscillator level parameters
         for param in params {
             let name = param.displayName.lowercased()
-            let id = param.identifier.lowercased()
             
             // Oscillator levels
             if (name.contains("oscillator") || name.contains("osc")) && 

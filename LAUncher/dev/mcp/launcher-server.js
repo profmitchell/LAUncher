@@ -3,13 +3,14 @@
  * LAUncher MCP Server
  *
  * JSON-RPC 2.0 over stdin/stdout. All live plugin control goes through LAUncher's
- * HTTP API (default http://localhost:5555). No mock fallback — start LAUncher with a plugin loaded.
+ * HTTP API (default http://127.0.0.1:5555). Use IPv4 literal: LAUncher binds AF_INET only, so "localhost"
+ * often hits ::1 first on macOS and fails. Override with LAUNCHER_HTTP_URL if needed.
  */
 
 const readline = require('readline');
 const http = require('http');
 
-const HTTP_API_URL = process.env.LAUNCHER_HTTP_URL || 'http://localhost:5555';
+const HTTP_API_URL = process.env.LAUNCHER_HTTP_URL || 'http://127.0.0.1:5555';
 
 function httpRequest(method, path, body = null) {
     return new Promise((resolve, reject) => {
@@ -21,6 +22,7 @@ function httpRequest(method, path, body = null) {
             method,
             headers: {
                 'Content-Type': 'application/json',
+                Connection: 'close',
             },
         };
 
@@ -76,7 +78,7 @@ async function assertLaUncherUp() {
 
 const notImplemented = (tool) => {
     throw new Error(
-        `${tool} is not implemented on LAUncher's HTTP API yet. Wired today: GET /health, POST /api/get_parameters, /api/set_parameters, /api/randomize_parameters.`
+        `${tool} is not implemented on LAUncher's HTTP API yet. Wired today: GET /health, POST /api/get_parameters, /api/set_parameters, /api/randomize_parameters, /api/analyze_patch.`
     );
 };
 
@@ -156,12 +158,13 @@ const tools = [
     },
     {
         name: 'analyze_patch',
-        description: 'Reserved for future LAUncher API (not available over HTTP yet).',
+        description:
+            'Refresh routing heuristics + short timbre summary + curated parameter highlights from the live plugin (POST /api/analyze_patch). Use before discussing the current preset in chat.',
         inputSchema: {
             type: 'object',
             properties: {
-                snapshotId: { type: ['string', 'null'] },
-                targetUse: { type: 'string' },
+                snapshotId: { type: ['string', 'null'], description: 'Ignored; analysis is always live state.' },
+                targetUse: { type: 'string', description: 'Optional note for your workflow; not sent to LAUncher.' },
             },
         },
     },
@@ -285,8 +288,9 @@ function handleSavePatchToLibrary() {
     notImplemented('save_patch_to_library');
 }
 
-function handleAnalyzePatch() {
-    notImplemented('analyze_patch');
+async function handleAnalyzePatch(args) {
+    await assertLaUncherUp();
+    return httpRequest('POST', '/api/analyze_patch', args || {});
 }
 
 async function handleExplainParameters(args) {
@@ -360,7 +364,7 @@ rl.on('line', async (line) => {
                         result = handleSavePatchToLibrary(args);
                         break;
                     case 'analyze_patch':
-                        result = handleAnalyzePatch(args || {});
+                        result = await handleAnalyzePatch(args || {});
                         break;
                     case 'explain_parameters':
                         result = await handleExplainParameters(args);

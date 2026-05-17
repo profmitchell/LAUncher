@@ -6,6 +6,49 @@ A Model Context Protocol (MCP) server that exposes tools for controlling and ana
 
 The LAUncher MCP server provides programmatic access to plugin parameters, patch snapshots, and musical analysis through a standardized JSON-RPC 2.0 interface. This allows AI assistants and other tools to interact with your synth plugins.
 
+## How to run (read this first)
+
+There are **two different processes**. Only one of them is something you “run” from Terminal yourself.
+
+### 1. LAUncher HTTP API (port `5555`) — **required for real plugin data**
+
+This is **inside the LAUncher macOS app**, not a separate terminal command.
+
+1. Open **LAUncher** (from Xcode, Finder, or `open` on your built `.app`).
+2. **Load a plugin** (Audio Unit). The in-app MCP HTTP server starts with the session and listens on **`http://127.0.0.1:5555`**.
+3. Check from Terminal:
+
+```bash
+curl -sS http://127.0.0.1:5555/health
+```
+
+You should see `OK`. If you get “Connection refused”, the app is not running or the MCP server has not started yet (load a plugin).
+
+### 2. Node MCP (`launcher-server.js`) — **used by Cursor / VS Code**
+
+This script speaks **JSON-RPC over stdin/stdout**. **You do not keep it running in Terminal** for normal use: **Cursor starts** `node …/launcher-server.js` when your MCP config loads and the agent uses that server.
+
+**Optional — one-off smoke test in Terminal** (sends one line, process exits):
+
+```bash
+cd /Users/Shared/CohenConcepts/LAUncher/MCP-SERVER-REPO/mcp
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | node launcher-server.js
+```
+
+To test that LAUncher is reachable from the script (will error if step 1 is not done):
+
+```bash
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"toolName":"get_parameters","arguments":{}}}' | node launcher-server.js
+```
+
+**Why there is no `npm start`:** this folder is not a Node service that stays open on its own; the MCP **client** (Cursor) is responsible for spawning and feeding stdin.
+
+### 3. Point Cursor at this script
+
+Edit `~/.cursor/mcp.json` and set `args` to the **absolute path** of `launcher-server.js` (see Installation below). Restart Cursor.
+
+---
+
 ## Installation
 
 1. **Ensure Node.js is installed** (v14 or higher)
@@ -13,13 +56,13 @@ The LAUncher MCP server provides programmatic access to plugin parameters, patch
    node --version
    ```
 
-2. **Configure Cursor** by editing `~/.cursor/mcp.json`:
+2. **Configure Cursor** by editing `~/.cursor/mcp.json` (use the real path to this file on your machine):
    ```json
    {
      "mcpServers": {
        "launcher": {
          "command": "node",
-         "args": ["/Users/Shared/CohenConcepts/LAUncher/LAUncher/dev/mcp/launcher-server.js"]
+         "args": ["/Users/Shared/CohenConcepts/LAUncher/MCP-SERVER-REPO/mcp/launcher-server.js"]
        }
      }
    }
@@ -248,24 +291,35 @@ Save current patch to local library.
 ```
 
 ### 6. `analyze_patch`
-Provides musical analysis: overview, timbre, and usage notes.
+Live snapshot analysis (no separate snapshot store): refreshes internal routing heuristics used by MCP chat, runs a short heuristic summary, and returns **curated** parameter highlights (not the full AU list — use `get_parameters` for that).
 
-**Arguments:**
-- `snapshotId` (optional): Use specific snapshot (null = current)
-- `targetUse` (optional): Hint for analysis (e.g., "bass / dnb")
+**HTTP:** `POST /api/analyze_patch` with body `{}` (extra fields ignored).
 
-**Returns:**
+**Arguments (MCP):**
+- `snapshotId` (optional): Ignored; always analyzes current plugin state.
+- `targetUse` (optional): For your notes only; not sent to LAUncher.
+
+**Returns (MCP / HTTP JSON body):**
 ```json
 {
-  "summary": "Short, snappy bass pluck...",
-  "timbre": {
-    "brightness": 0.7,
-    "warmth": 0.5,
-    "roughness": 0.2,
-    "space": 0.3
-  },
-  "coreIngredients": [...],
-  "usageNotes": [...]
+  "result": "ok",
+  "analysis": {
+    "plugin": "Serum 2",
+    "presetName": "My Preset",
+    "summary": "Warm pad with gentle attack...",
+    "timbre": { "brightness": 0.5, "warmth": 0.5, "roughness": 0.2, "space": 0.3 },
+    "routing": {
+      "detectedPluginType": "Serum",
+      "oscillatorLevelParameterIds": ["..."],
+      "filterCutoffParameterIds": ["..."],
+      "modulationMatrixSlotCount": 0
+    },
+    "highlights": [
+      { "id": "0", "displayName": "Main Vol", "value": 0.5, "min": 0, "max": 1 }
+    ],
+    "highlightCount": 42,
+    "totalParameterCount": 2622
+  }
 }
 ```
 
@@ -290,10 +344,10 @@ Explains what selected parameters do in musical terms.
 
 ## Implementation Status
 
-**Current (launcher-server.js):** Live **LAUncher HTTP API** only (`http://localhost:5555` by default, override with `LAUNCHER_HTTP_URL`). There is **no mock fallback** — if the app is not running or no plugin is loaded, tool calls return a JSON-RPC error.
+**Current (launcher-server.js):** Live **LAUncher HTTP API** only (`http://127.0.0.1:5555` by default — **not** `localhost`, because LAUncher listens on IPv4 only and `localhost` often resolves to `::1` on macOS). Override with `LAUNCHER_HTTP_URL`. There is **no mock fallback** — if the app is not running or no plugin is loaded, tool calls return a JSON-RPC error.
 
 - **Wired:** `get_parameters`, `set_parameters`, `randomize_parameters`, `get_patch_snapshot` (from live AU params), `set_patch_snapshot` (inline `rawParameters` → `set_parameters`), `explain_parameters` (from live AU metadata).
-- **Not on HTTP yet:** `save_patch_to_library`, `analyze_patch` — calls fail with a clear “not implemented” message until Swift adds routes.
+- **Not on HTTP yet:** `save_patch_to_library` — calls fail with a clear “not implemented” message until Swift adds a route. **`analyze_patch`** is implemented as `POST /api/analyze_patch` (see below).
 
 **Requirements:** LAUncher running with the in-app MCP HTTP server active (starts with `PluginHostSession`) and a **plugin loaded** so `/api/get_parameters` returns data.
 
@@ -319,7 +373,9 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | node launcher-server.js
 2. **Node not found:** Ensure Node.js is installed and in PATH
 3. **Permission denied:** Run `chmod +x launcher-server.js`
 4. **Connection errors:** Restart Cursor after configuration changes
-5. **"LAUncher HTTP API not reachable":** Open LAUncher, load a plugin, confirm port 5555 (optional: `curl http://127.0.0.1:5555/health`). Use `LAUNCHER_HTTP_URL` if the app listens elsewhere.
+5. **"LAUncher HTTP API not reachable":** Open LAUncher, load a plugin, then test **`curl -sS http://127.0.0.1:5555/health`** (prefer **`127.0.0.1`** over `localhost` on macOS). If you set `LAUNCHER_HTTP_URL`, avoid `http://localhost:5555` unless you know IPv6 is listening. **If `curl` still cannot connect:** rebuild LAUncher after pulling changes — **App Sandbox** requires the **`com.apple.security.network.server`** entitlement for the MCP socket to bind; without it, the server never listens (check Xcode console for `❌ MCP HTTP server failed to start`). Confirm nothing else owns the port: `lsof -nP -iTCP:5555 -sTCP:LISTEN`.
+
+6. **`curl localhost:5555` fails but `curl 127.0.0.1:5555` works:** Use IPv4. The Node script defaults to `127.0.0.1` for the same reason.
 
 ## See Also
 
