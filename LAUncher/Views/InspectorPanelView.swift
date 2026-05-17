@@ -1,11 +1,9 @@
 import SwiftUI
 import AudioToolbox
+import AVFAudio
 
 struct InspectorPanelView: View {
     @ObservedObject var session: PluginHostSession
-    @State private var selection: Tab = .io
-
-    enum Tab: String, CaseIterable { case io = "I/O", midi = "MIDI", presets = "Presets" }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -27,8 +25,8 @@ struct InspectorPanelView: View {
             Divider()
 
             // Tab Picker
-            Picker("", selection: $selection) {
-                ForEach(Tab.allCases, id: \.self) { t in
+            Picker("", selection: $session.inspectorSection) {
+                ForEach(PluginHostSession.InspectorSection.allCases, id: \.self) { t in
                     Text(t.rawValue).tag(t)
                 }
             }
@@ -40,7 +38,7 @@ struct InspectorPanelView: View {
 
             // Content
             Group {
-                switch selection {
+                switch session.inspectorSection {
                 case .io:
                     ioView
                 case .midi:
@@ -52,7 +50,7 @@ struct InspectorPanelView: View {
             .padding(12)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .frame(minWidth: 200, idealWidth: 320, maxWidth: 500)
+        .frame(minWidth: 280, idealWidth: 420, maxWidth: 620)
         .background(session.themeManager.currentTheme.materialStyle.material)
     }
 
@@ -103,7 +101,15 @@ struct InspectorPanelView: View {
     private var presetView: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Plugin Presets").font(.headline)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Preset Browser").font(.headline)
+                    if let component = session.currentComponent {
+                        Text(component.name)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
                 Spacer()
                 Button {
                     session.refreshPresetList()
@@ -146,7 +152,7 @@ struct InspectorPanelView: View {
                     }
                 }
                 .listStyle(.inset)
-                .frame(minHeight: 220)
+                .frame(minHeight: 320)
             }
         }
     }

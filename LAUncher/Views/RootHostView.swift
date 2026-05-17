@@ -7,8 +7,8 @@ struct RootHostView: View {
     @State private var chatWindow: NSWindow?
     @State private var topBarHeight: CGFloat = 84
     @State private var mtOffset: CGSize = .zero
-    @State private var leftSidebarWidth: CGFloat = 240
-    @State private var rightSidebarWidth: CGFloat = 320
+    @State private var leftSidebarWidth: CGFloat = 320
+    @State private var rightSidebarWidth: CGFloat = 420
     
     var body: some View {
         HStack(spacing: 0) {
@@ -17,12 +17,12 @@ struct RootHostView: View {
                 .frame(width: leftSidebarWidth)
             
             // Resizable Divider
-            ResizableDivider(
-                width: $leftSidebarWidth,
-                minWidth: 180,
-                maxWidth: 400,
-                isRightSide: false
-            )
+                ResizableDivider(
+                    width: $leftSidebarWidth,
+                    minWidth: 220,
+                    maxWidth: 420,
+                    isRightSide: false
+                )
             
             // Main Content
             ZStack(alignment: .bottom) {
@@ -54,8 +54,8 @@ struct RootHostView: View {
                 // Resizable Divider
                 ResizableDivider(
                     width: $rightSidebarWidth,
-                    minWidth: 200,
-                    maxWidth: 500,
+                    minWidth: 280,
+                    maxWidth: 620,
                     isRightSide: true
                 )
                 
@@ -67,6 +67,16 @@ struct RootHostView: View {
         .frame(minWidth: 960, minHeight: 600)
         .animation(.easeInOut(duration: 0.2), value: session.themeManager.currentTheme.id)
         .animation(.easeInOut(duration: 0.3), value: session.isShowingInspector)
+        .onChange(of: session.inspectorSection) {
+            if session.inspectorSection == .presets {
+                rightSidebarWidth = max(rightSidebarWidth, 460)
+            }
+        }
+        .onChange(of: session.isShowingInspector) {
+            if session.isShowingInspector && session.inspectorSection == .presets {
+                rightSidebarWidth = max(rightSidebarWidth, 460)
+            }
+        }
         .sheet(isPresented: $session.isShowingPluginPicker) {
             PluginPickerView(session: session)
         }

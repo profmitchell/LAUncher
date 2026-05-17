@@ -14,6 +14,12 @@ final class PluginHostSession: ObservableObject {
         case error(String)
     }
 
+    enum InspectorSection: String, CaseIterable {
+        case io = "I/O"
+        case midi = "MIDI"
+        case presets = "Presets"
+    }
+
     @Published private(set) var engineState: EngineState = .stopped
     @Published private(set) var currentComponent: AVAudioUnitComponent?
     @Published private(set) var pluginViewController: NSViewController?
@@ -42,6 +48,7 @@ final class PluginHostSession: ObservableObject {
     @Published var isShowingMIDIMap = false
     @Published var isShowingChat = false
     @Published var isShowingInspector = false
+    @Published var inspectorSection: InspectorSection = .io
     @Published var isShowingHelp = false
     @Published var exportedParameterJSON: String = ""
     
@@ -273,7 +280,13 @@ final class PluginHostSession: ObservableObject {
 
     func load(component: AVAudioUnitComponent) async {
         do {
+            if currentComponent != nil {
+                unloadCurrentInstrument()
+            }
+
             pluginViewController = nil
+            factoryPresets = []
+            currentPresetName = nil
             lastErrorDescription = nil
             
             // Debug: Log component details before loading
@@ -329,6 +342,12 @@ final class PluginHostSession: ObservableObject {
                 print("   Underlying error: \(underlyingError)")
             }
         }
+    }
+
+    func showPresetBrowser() {
+        refreshPresetList()
+        inspectorSection = .presets
+        isShowingInspector = true
     }
     
     private func fourCCToString(_ value: OSType) -> String {

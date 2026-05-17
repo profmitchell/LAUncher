@@ -1,7 +1,46 @@
 import SwiftUI
+import AVFoundation
 
 struct LeftSidebarView: View {
     @ObservedObject var session: PluginHostSession
+    @State private var pluginSearchText = ""
+    @State private var selectedScope: SidebarPluginScope = .all
+    @State private var loadingComponent: AVAudioUnitComponent?
+
+    private enum SidebarPluginScope: String, CaseIterable, Identifiable {
+        case all = "All"
+        case recent = "Recent"
+        case instruments = "Inst"
+        case effects = "FX"
+
+        var id: String { rawValue }
+    }
+
+    private var pluginSource: [AVAudioUnitComponent] {
+        let components = session.availablePlugins.isEmpty ? session.availableInstruments : session.availablePlugins
+        switch selectedScope {
+        case .all:
+            return components
+        case .recent:
+            return session.recentPluginComponents
+        case .instruments:
+            return components.filter { $0.audioComponentDescription.componentType == kAudioUnitType_MusicDevice }
+        case .effects:
+            return components.filter { $0.audioComponentDescription.componentType == kAudioUnitType_Effect }
+        }
+    }
+
+    private var filteredPlugins: [AVAudioUnitComponent] {
+        let sorted = pluginSource.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+
+        guard !pluginSearchText.isEmpty else { return sorted }
+        return sorted.filter { component in
+            component.name.localizedCaseInsensitiveContains(pluginSearchText) ||
+            component.manufacturerName.localizedCaseInsensitiveContains(pluginSearchText)
+        }
+    }
     
     var body: some View {
         VStack(spacing: 0) {
@@ -35,57 +74,124 @@ struct LeftSidebarView: View {
             
             Divider()
             
-            // Transport & Engine
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Transport")
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-                
-                HStack(spacing: 6) {
-                    Label("BPM", systemImage: "metronome")
-                        .font(.caption)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Plugin Browser")
+                        .font(.headline)
                         .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    Button {
+                        session.rescanPlugins()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Rescan plugins")
+                }
+
+                TextField("Search plugins", text: $pluginSearchText)
+                    .textFieldStyle(.roundedBorder)
+
+                Picker("Plugin type", selection: $selectedScope) {
+                    ForEach(SidebarPluginScope.allCases) { scope in
+                        Text(scope.rawValue).tag(scope)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 4) {
+                        if filteredPlugins.isEmpty {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Image(systemName: "magnifyingglass")
+                                    .foregroundStyle(.secondary)
+                                Text(pluginSearchText.isEmpty ? "No plugins found" : "No matches")
+                                    .font(.callout.weight(.medium))
+                                Text(pluginSearchText.isEmpty ? "Try rescanning Audio Units." : "Change the search or filter.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 18)
+                        } else {
+                            ForEach(filteredPlugins, id: \.self) { component in
+                                SidebarPluginRow(
+                                    component: component,
+                                    isCurrent: session.currentComponent == component,
+                                    isLoading: loadingComponent == component,
+                                    typeLabel: componentTypeLabel(component)
+                                ) {
+                                    load(component)
+                                }
+                            }
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+                .frame(maxHeight: .infinity)
+                .scrollIndicators(.visible)
+            }
+            .padding(16)
+            .frame(maxHeight: .infinity)
+            .layoutPriority(1)
+
+            Divider()
+
+            // Transport & Engine
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Button {
+                        session.toggleTransport()
+                    } label: {
+                        Image(systemName: session.isTransportPlaying ? "pause.circle" : "play.circle.fill")
+                    }
+                    .buttonStyle(.bordered)
+                    .help(session.isTransportPlaying ? "Pause" : "Play")
+
                     TextField("BPM", value: $session.bpm, format: .number)
                         .textFieldStyle(.roundedBorder)
-                        .frame(width: 60)
+                        .frame(width: 58)
+                        .help("BPM")
+
                     Stepper("", value: Binding(get: { Int(session.bpm) }, set: { session.bpm = Double($0) }), in: 10...400)
                         .labelsHidden()
-                }
-                
-                Button {
-                    session.toggleTransport()
-                } label: {
-                    Label(session.isTransportPlaying ? "Pause" : "Play",
-                          systemImage: session.isTransportPlaying ? "pause.circle" : "play.circle.fill")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(.bordered)
-                
-                HStack(spacing: 6) {
+
+                    Spacer()
+
                     Circle()
                         .fill(engineIndicatorColor)
-                        .frame(width: 10, height: 10)
-                    Text(engineStatusText)
-                        .foregroundStyle(.secondary)
-                    Spacer()
+                        .frame(width: 9, height: 9)
+
                     Button {
                         session.toggleEngineRunning()
                     } label: {
-                        Label(session.engineState == .running ? "Stop" : "Start",
-                              systemImage: session.engineState == .running ? "stop.circle" : "play.circle")
+                        Text(session.engineState == .running ? "Stop" : "Start")
                     }
                     .buttonStyle(.bordered)
+                    .help(engineStatusText)
                 }
             }
-            .padding(16)
-            
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+
             Divider()
-            
+
             // Quick actions
             VStack(alignment: .leading, spacing: 12) {
                 Text("Tools")
                     .font(.headline)
                     .foregroundStyle(.secondary)
+
+                Button {
+                    session.showPresetBrowser()
+                } label: {
+                    Label("Preset Browser", systemImage: "rectangle.stack")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.bordered)
                 
                 if session.currentComponent != nil {
                     Button {
@@ -123,8 +229,31 @@ struct LeftSidebarView: View {
             
             Spacer()
         }
-        .frame(minWidth: 180, idealWidth: 240, maxWidth: 400)
+        .frame(minWidth: 220, idealWidth: 320, maxWidth: 420)
         .background(.ultraThinMaterial)
+    }
+
+    private func load(_ component: AVAudioUnitComponent) {
+        guard loadingComponent == nil, session.currentComponent != component else { return }
+        loadingComponent = component
+
+        Task { @MainActor in
+            defer { loadingComponent = nil }
+            await session.load(component: component)
+        }
+    }
+
+    private func componentTypeLabel(_ component: AVAudioUnitComponent) -> String {
+        switch component.audioComponentDescription.componentType {
+        case kAudioUnitType_MusicDevice: return "Instrument"
+        case kAudioUnitType_Effect: return "Effect"
+        case kAudioUnitType_Generator: return "Generator"
+        case kAudioUnitType_Mixer: return "Mixer"
+        case kAudioUnitType_Panner: return "Panner"
+        case kAudioUnitType_FormatConverter: return "Format"
+        case kAudioUnitType_OfflineEffect: return "Offline"
+        default: return component.typeName
+        }
     }
     
     private var engineIndicatorColor: Color {
@@ -144,9 +273,90 @@ struct LeftSidebarView: View {
             return "Running"
         case .stopped:
             return "Stopped"
-        case .error(let message):
+        case .error:
             return "Error"
         }
     }
 }
 
+private struct SidebarPluginRow: View {
+    let component: AVAudioUnitComponent
+    let isCurrent: Bool
+    let isLoading: Bool
+    let typeLabel: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                icon
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(component.name)
+                        .font(.callout.weight(isCurrent ? .semibold : .regular))
+                        .lineLimit(1)
+
+                    HStack(spacing: 5) {
+                        Text(component.manufacturerName)
+                            .lineLimit(1)
+                        Text("·")
+                        Text(typeLabel)
+                            .lineLimit(1)
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 6)
+
+                if isLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                } else if isCurrent {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.tint)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background {
+                if isCurrent {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.14))
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(isLoading)
+    }
+
+    @ViewBuilder
+    private var icon: some View {
+        if let nsImage = component.icon {
+            Image(nsImage: nsImage)
+                .resizable()
+                .frame(width: 24, height: 24)
+                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+        } else {
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(.quaternary)
+                .frame(width: 24, height: 24)
+                .overlay(
+                    Image(systemName: systemImage)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                )
+        }
+    }
+
+    private var systemImage: String {
+        switch component.audioComponentDescription.componentType {
+        case kAudioUnitType_MusicDevice: return "pianokeys"
+        case kAudioUnitType_Effect: return "slider.horizontal.3"
+        case kAudioUnitType_Generator: return "waveform"
+        default: return "waveform.path"
+        }
+    }
+}
