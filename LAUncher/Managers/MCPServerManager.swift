@@ -138,42 +138,88 @@ private class SocketListener {
             }
         }
     }
+
+    /// Reads until `\r\n\r\n`, then reads optional body per `Content-Length` (byte count). Large `set_parameters` JSON exceeds one recv buffer.
+    private func readFullHTTPRequest(clientSocket: Int32) async -> Data? {
+        let crlf2 = Data("\r\n\r\n".utf8)
+        let maxTotalBytes = 52_428_800 // 50 MB cap
+        let maxWaitAttempts = 8000 // ~80s at 10ms
+        var data = Data()
+        data.reserveCapacity(65536)
+
+        let flags = fcntl(clientSocket, F_GETFL, 0)
+        _ = fcntl(clientSocket, F_SETFL, flags | O_NONBLOCK)
+
+        var chunk = [UInt8](repeating: 0, count: 65_536)
+        var attempts = 0
+
+        func recvOnce() -> Int {
+            recv(clientSocket, &chunk, chunk.count, 0)
+        }
+
+        // Phase 1: headers + start of body
+        while attempts < maxWaitAttempts {
+            if data.count > maxTotalBytes { return nil }
+            let n = recvOnce()
+            if n > 0 {
+                data.append(contentsOf: chunk[0..<n])
+                attempts = 0
+                if data.range(of: crlf2) != nil { break }
+            } else if n < 0, errno == EINTR {
+                continue
+            } else if n < 0, errno == EAGAIN || errno == EWOULDBLOCK {
+                try? await Task.sleep(nanoseconds: 10_000_000)
+                attempts += 1
+            } else {
+                break
+            }
+        }
+
+        guard let sepRange = data.range(of: crlf2) else { return nil }
+        let bodyStart = sepRange.upperBound
+        guard let headerStr = String(data: data.prefix(bodyStart), encoding: .utf8) else { return nil }
+
+        var contentLength = 0
+        for line in headerStr.components(separatedBy: "\r\n") {
+            let lower = line.lowercased()
+            guard lower.hasPrefix("content-length:") else { continue }
+            let parts = line.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.count == 2 else { continue }
+            if let v = Int(parts[1].trimmingCharacters(in: .whitespaces)) {
+                contentLength = max(0, v)
+            }
+            break
+        }
+
+        let targetSize = bodyStart + contentLength
+        while data.count < targetSize && attempts < maxWaitAttempts {
+            if data.count > maxTotalBytes { return nil }
+            let n = recvOnce()
+            if n > 0 {
+                data.append(contentsOf: chunk[0..<n])
+                attempts = 0
+            } else if n < 0, errno == EINTR {
+                continue
+            } else if n < 0, errno == EAGAIN || errno == EWOULDBLOCK {
+                try? await Task.sleep(nanoseconds: 10_000_000)
+                attempts += 1
+            } else {
+                break
+            }
+        }
+
+        guard data.count >= targetSize else { return nil }
+        if data.count > targetSize {
+            return Data(data.prefix(targetSize))
+        }
+        return data
+    }
     
     private func handleConnection(clientSocket: Int32) async {
         defer { close(clientSocket) }
         
-        var buffer = [UInt8](repeating: 0, count: 8192)
-        
-        // Set socket to non-blocking for read
-        let flags = fcntl(clientSocket, F_GETFL, 0)
-        _ = fcntl(clientSocket, F_SETFL, flags | O_NONBLOCK)
-        
-        var totalRead = 0
-        var attempts = 0
-        let maxAttempts = 100 // 1 second max wait
-        
-        // Read request in chunks (non-blocking)
-        while attempts < maxAttempts {
-            let bytesRead = recv(clientSocket, &buffer[totalRead], 8192 - totalRead, 0)
-            
-            if bytesRead > 0 {
-                totalRead += bytesRead
-                if totalRead >= 8192 {
-                    break
-                }
-            } else if errno == EAGAIN || errno == EWOULDBLOCK {
-                // No data available yet, wait a bit
-                try? await Task.sleep(nanoseconds: 10_000_000) // 10ms
-                attempts += 1
-            } else {
-                // Error or connection closed
-                break
-            }
-        }
-        
-        guard totalRead > 0 else { return }
-        
-        guard let requestString = String(bytes: buffer.prefix(totalRead), encoding: .utf8) else { return }
+        guard let requestData = await readFullHTTPRequest(clientSocket: clientSocket),
+              let requestString = String(data: requestData, encoding: .utf8) else { return }
         
         let responseData = await handleRequest(requestString)
 
