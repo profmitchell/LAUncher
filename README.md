@@ -32,40 +32,9 @@
 
 ---
 
-## Screenshots
+## Demo
 
-<div align="center">
-
-<table>
-<tr>
-<td align="center">
-<a href="docs/screenshots/launcher1.png"><img src="docs/screenshots/launcher1.png" alt="Main Interface" width="300"/></a>
-</td>
-<td align="center">
-<a href="docs/screenshots/launcher2.png"><img src="docs/screenshots/launcher2.png" alt="Plugin View" width="300"/></a>
-</td>
-<td align="center">
-<a href="docs/screenshots/midi-learn.png"><img src="docs/screenshots/midi-learn.png" alt="MIDI Learn" width="300"/></a>
-</td>
-</tr>
-<tr>
-<td align="center">
-<a href="docs/screenshots/inspector-panel.png"><img src="docs/screenshots/inspector-panel.png" alt="Inspector Panel" width="300"/></a>
-</td>
-<td align="center">
-<a href="docs/screenshots/theme-selection.png"><img src="docs/screenshots/theme-selection.png" alt="Theme Selection" width="300"/></a>
-</td>
-<td align="center">
-<a href="docs/screenshots/qwerty-piano.png"><img src="docs/screenshots/qwerty-piano.png" alt="QWERTY Piano" width="300"/></a>
-</td>
-</tr>
-</table>
-
-</div>
-
-### Video Demo
-
-**[🎥 Watch Demo Video on YouTube Shorts](https://youtube.com/shorts/7USYbhsH5qc?feature=share)**
+**[Watch demo video on YouTube Shorts](https://youtube.com/shorts/7USYbhsH5qc?feature=share)**
 
 ---
 
