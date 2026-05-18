@@ -203,14 +203,6 @@ struct LeftSidebarView: View {
                     .foregroundStyle(LauncherChrome.textMain(theme))
 
                 Button {
-                    session.showPresetBrowser()
-                } label: {
-                    Label("Preset Browser", systemImage: "rectangle.stack")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(LauncherPillButtonStyle(theme: theme))
-
-                Button {
                     session.isShowingMCPTools = true
                 } label: {
                     Label("MCP Tools", systemImage: "wand.and.stars")

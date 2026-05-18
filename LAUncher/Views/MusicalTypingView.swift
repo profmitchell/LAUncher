@@ -29,7 +29,7 @@ struct MusicalTypingView: View {
                 .buttonStyle(.bordered)
                 .help("Octave down ([)")
 
-                Text("QWERTY Piano • Octave \(manager.baseOctave)")
+                Text("Octave \(manager.baseOctave)")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 

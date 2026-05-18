@@ -6,7 +6,7 @@ struct RootHostView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var chatWindow: NSWindow?
     @State private var topBarHeight: CGFloat = 84
-    @State private var mtOffset: CGSize = .zero
+    @State private var mtOffset: CGSize = CGSize(width: 0, height: -96)
     @State private var leftSidebarWidth: CGFloat = 320
     @State private var rightSidebarWidth: CGFloat = 420
     
@@ -25,7 +25,7 @@ struct RootHostView: View {
                 )
             
             // Main Content
-            ZStack(alignment: .bottom) {
+            ZStack(alignment: .bottomTrailing) {
                 VStack(spacing: 0) {
                     TopBarView(session: session, expanded: topBarHeight > 96)
                         .frame(height: topBarHeight, alignment: .top)
@@ -41,8 +41,9 @@ struct RootHostView: View {
 
                 if session.isMusicalTypingEnabled && session.isMusicalTypingVisible {
                     DraggableMusicalTyping(session: session, offset: $mtOffset)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                        .padding(.bottom, 12)
+                        .padding(.trailing, 10)
+                        .padding(.bottom, 6)
+                        .transition(.opacity.combined(with: .scale(scale: 0.97)))
                 }
 
                 RotationGestureCatcherView()
@@ -67,16 +68,6 @@ struct RootHostView: View {
         .frame(minWidth: 960, minHeight: 600)
         .animation(.easeInOut(duration: 0.2), value: session.themeManager.currentTheme.id)
         .animation(.easeInOut(duration: 0.3), value: session.isShowingInspector)
-        .onChange(of: session.inspectorSection) {
-            if session.inspectorSection == .presets {
-                rightSidebarWidth = max(rightSidebarWidth, 460)
-            }
-        }
-        .onChange(of: session.isShowingInspector) {
-            if session.isShowingInspector && session.inspectorSection == .presets {
-                rightSidebarWidth = max(rightSidebarWidth, 460)
-            }
-        }
         .sheet(isPresented: $session.isShowingPluginPicker) {
             PluginPickerView(session: session)
         }
@@ -225,32 +216,60 @@ struct RootHostView: View {
         }
     }
 
-    // MARK: - Draggable Musical Typing Container
+    // MARK: - Draggable Musical Typing (floating panel)
     private struct DraggableMusicalTyping: View {
         @ObservedObject var session: PluginHostSession
         @Binding var offset: CGSize
         @State private var dragStart: CGSize = .zero
 
+        private var theme: AppTheme { session.themeManager.currentTheme }
+
         var body: some View {
             VStack(spacing: 0) {
-                Capsule(style: .continuous)
-                    .fill(Color.primary.opacity(0.12))
-                    .frame(width: 80, height: 6)
-                    .padding(.top, 6)
-                    .padding(.bottom, 4)
-                    .gesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { value in
-                                if dragStart == .zero { dragStart = offset }
-                                offset = CGSize(width: dragStart.width + value.translation.width,
-                                                height: dragStart.height + value.translation.height)
-                            }
-                            .onEnded { _ in dragStart = .zero }
-                    )
+                HStack(spacing: 8) {
+                    Image(systemName: "line.3.horizontal")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(LauncherChrome.textMuted(theme))
+                    Text("QWERTY Piano")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(LauncherChrome.textMain(theme))
+                    Spacer(minLength: 0)
+                    Text("Drag")
+                        .font(.caption2)
+                        .foregroundStyle(LauncherChrome.textMuted(theme))
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+
+                Divider()
+                    .opacity(0.35)
+
                 MusicalTypingView(session: session)
             }
-            .background(Color.clear)
+            .frame(minWidth: 520)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(LauncherChrome.border(theme).opacity(0.45), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.38), radius: 28, y: 14)
             .offset(offset)
+            .gesture(
+                DragGesture(minimumDistance: 2)
+                    .onChanged { value in
+                        if dragStart == .zero { dragStart = offset }
+                        offset = CGSize(
+                            width: dragStart.width + value.translation.width,
+                            height: dragStart.height + value.translation.height
+                        )
+                    }
+                    .onEnded { _ in
+                        dragStart = .zero
+                    }
+            )
         }
     }
 
