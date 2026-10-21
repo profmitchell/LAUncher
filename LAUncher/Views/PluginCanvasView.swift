@@ -15,67 +15,115 @@ struct PluginCanvasView: View {
     }
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(placeholderFill)
-                .opacity(session.pluginViewController == nil ? 1 : 0)
-                .animation(.easeInOut(duration: 0.2), value: session.pluginViewController == nil)
-
-            if let controller = session.pluginViewController {
-                PluginEditorContainer(viewController: controller, session: session)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .padding(12)
-                    .background(controllerBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .overlay(
-                        // Visual indicator when learn mode is active
-                        Group {
-                            if session.midiMapManager.isInLearnMode {
-                                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                    .stroke(Color.green.opacity(0.6), lineWidth: 3)
-                                    .padding(12)
-                            }
-                        }
-                    )
-            } else {
-                VStack(spacing: 14) {
-                    Image(systemName: "square.stack.3d.up")
-                        .font(.system(size: 40, weight: .regular))
-                        .foregroundStyle(.secondary)
-                    Text("Load Plugin")
-                        .font(.title2.weight(.semibold))
-                        .foregroundStyle(LauncherChrome.textMain(theme))
-                    Text("Choose an Audio Unit instrument or effect to begin.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                    Button {
-                        session.refreshPluginList()
-                        session.isShowingPluginPicker = true
-                    } label: {
-                        Label("Load Plugin…", systemImage: "plus.square.on.square")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                }
-                .padding(24)
+        VStack(spacing: 0) {
+            if let error = session.lastErrorDescription, session.currentComponent == nil {
+                loadErrorBanner(error)
             }
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(placeholderFill)
+                    .opacity(session.pluginViewController == nil ? 1 : 0)
+                    .animation(.easeInOut(duration: 0.2), value: session.pluginViewController == nil)
+
+                if let controller = session.pluginViewController {
+                    PluginEditorContainer(viewController: controller, session: session)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .padding(12)
+                        .background(controllerBackground)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .overlay(
+                            Group {
+                                if session.midiMapManager.isInLearnMode {
+                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                        .stroke(Color.green.opacity(0.6), lineWidth: 3)
+                                        .padding(12)
+                                }
+                            }
+                        )
+                } else {
+                    VStack(spacing: 14) {
+                        Image(systemName: "square.stack.3d.up")
+                            .font(.system(size: 40, weight: .regular))
+                            .foregroundStyle(.secondary)
+                        Text("Load Plugin")
+                            .font(.title2.weight(.semibold))
+                            .foregroundStyle(LauncherChrome.textMain(theme))
+                        Text("Pick a plugin from the left list, or click Load Plugin…")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                        Button {
+                            session.refreshPluginList()
+                            session.isShowingPluginPicker = true
+                        } label: {
+                            Label("Load Plugin…", systemImage: "plus.square.on.square")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                    }
+                    .padding(24)
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 24)
+            .background(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(containerBackground)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 24, style: .continuous)
+                            .stroke(borderColor, lineWidth: 1)
+                    )
+                    .padding(16)
+            )
+            .padding(.horizontal, 16)
+            .padding(.top, session.lastErrorDescription == nil || session.currentComponent != nil ? 24 : 8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 24)
-        .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(containerBackground)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .stroke(borderColor, lineWidth: 1)
-                )
-                .padding(16)
-        )
-        .padding(.horizontal, 16)
-        .padding(.top, 24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         .animation(.easeInOut(duration: 0.2), value: themeManager.currentTheme.id)
+    }
+
+    private func loadErrorBanner(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.yellow)
+            VStack(alignment: .leading, spacing: 4) {
+                if let name = session.lastFailedPluginName {
+                    Text("Couldn’t load \(name)")
+                        .font(.headline)
+                } else {
+                    Text("Plugin didn’t load")
+                        .font(.headline)
+                }
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Button("Open Settings") {
+                session.openSettings(section: .audio)
+            }
+            .buttonStyle(.bordered)
+            if session.lastFailedPluginName != nil {
+                Button("Try Again") {
+                    Task { await session.retryLastFailedPlugin() }
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            Button {
+                session.clearLoadError()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.borderless)
+        }
+        .padding(14)
+        .background(.yellow.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.horizontal, 28)
+        .padding(.top, 16)
     }
 
     private var placeholderFill: Color {
@@ -106,7 +154,5 @@ private struct PluginEditorContainer: NSViewControllerRepresentable {
     }
 
     func updateNSViewController(_ nsViewController: NSViewController, context: Context) {
-        // Don't force layout here - it causes recursion warnings
-        // Plugin view controllers handle their own updates when parameters change
     }
 }

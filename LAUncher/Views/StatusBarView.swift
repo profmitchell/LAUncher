@@ -11,26 +11,43 @@ struct StatusBarView: View {
     }
 
     var body: some View {
-        HStack(spacing: 24) {
-            statusLabel(icon: "waveform.path", title: "Sample Rate", value: formattedSampleRate)
-            statusLabel(icon: "timer", title: "Buffer", value: formattedBufferDuration)
-
-            if let midi = session.selectedMidiSource {
-                statusLabel(icon: "pianokeys", title: "MIDI", value: midi.name)
-            } else {
-                statusLabel(icon: "pianokeys", title: "MIDI", value: "All Sources")
+        HStack(spacing: 16) {
+            Button {
+                session.openSettings(section: .audio)
+            } label: {
+                statusLabel(icon: "waveform.path", title: "Sample Rate", value: formattedSampleRate)
             }
+            .buttonStyle(.plain)
+            .help("Open Settings to change sample rate")
+
+            Button {
+                session.openSettings(section: .audio)
+            } label: {
+                statusLabel(icon: "hifispeaker", title: "Output", value: outputDeviceLabel)
+            }
+            .buttonStyle(.plain)
+            .help("Open Settings to choose output device")
+
+            Button {
+                session.openSettings(section: .midi)
+            } label: {
+                statusLabel(
+                    icon: "pianokeys",
+                    title: "MIDI",
+                    value: session.selectedMidiSource?.name ?? "All Sources"
+                )
+            }
+            .buttonStyle(.plain)
+            .help("Open Settings to choose MIDI input")
 
             if case let .error(message) = session.engineState {
-                Divider()
-                    .frame(height: 16)
+                Divider().frame(height: 16)
                 Label(message, systemImage: "exclamationmark.triangle.fill")
                     .foregroundColor(.yellow)
                     .lineLimit(2)
                     .help(message)
             } else if let message = session.lastErrorDescription, session.currentComponent == nil {
-                Divider()
-                    .frame(height: 16)
+                Divider().frame(height: 16)
                 Label(message, systemImage: "exclamationmark.triangle.fill")
                     .foregroundColor(.yellow)
                     .lineLimit(2)
@@ -39,7 +56,6 @@ struct StatusBarView: View {
 
             Spacer()
 
-            // Master Gain
             HStack(spacing: 8) {
                 Image(systemName: "speaker.wave.2.fill")
                     .foregroundStyle(.secondary)
@@ -66,6 +82,10 @@ struct StatusBarView: View {
         .animation(.easeInOut(duration: 0.2), value: themeManager.currentTheme.id)
     }
 
+    private var outputDeviceLabel: String {
+        session.selectedOutputDevice?.displayName ?? "None"
+    }
+
     private func statusLabel(icon: String, title: String, value: String) -> some View {
         HStack(spacing: 6) {
             Image(systemName: icon)
@@ -77,8 +97,10 @@ struct StatusBarView: View {
                 Text(value)
                     .font(.footnote)
                     .foregroundStyle(.primary)
+                    .lineLimit(1)
             }
         }
+        .contentShape(Rectangle())
     }
 
     private var statusBackground: Color {
@@ -94,17 +116,14 @@ struct StatusBarView: View {
     private var formattedSampleRate: String {
         let rate = session.sampleRate
         guard rate > 0 else { return "–" }
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.maximumFractionDigits = 0
-        return formatter.string(from: NSNumber(value: rate)) ?? "\(Int(rate))"
-    }
-
-    private var formattedBufferDuration: String {
-        let duration = session.bufferDuration
-        guard duration > 0 else { return "–" }
-        let milliseconds = duration * 1000
-        return String(format: "%.2f ms", milliseconds)
+        if rate >= 1000 {
+            let k = rate / 1000
+            if abs(k.rounded() - k) < 0.01 {
+                return "\(Int(k)) kHz"
+            }
+            return String(format: "%.1f kHz", k)
+        }
+        return "\(Int(rate)) Hz"
     }
 
     private var masterGainDb: String {

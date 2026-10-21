@@ -49,7 +49,7 @@ struct HelpView: View {
                             helpItem(title: "BPM Sync", description: "Set the BPM in the left sidebar. When transport is playing, tempo-synced effects (like LFOs) will sync to the host BPM.")
                             helpItem(title: "Rescan Plugins", description: "Use Rescan when you install new Audio Units. LAUncher refreshes the AudioComponent registry and updates the browser.")
                             helpItem(title: "Themes", description: "Choose from 11 built-in themes or create custom themes. Access from the 'More' menu → 'Theme'.")
-                            helpItem(title: "Inspector Panel", description: "Toggle the right-side inspector to access audio device selection and MIDI input settings.")
+                            helpItem(title: "Settings", description: "Click Settings (or press ⌘,) to choose output/input devices, sample rate, MIDI, and theme. If an effect won’t load, try 48 kHz.")
                         }
                     }
                     

@@ -19,6 +19,22 @@ final class PluginHostSession: ObservableObject {
         case midi = "MIDI"
     }
 
+    enum SettingsSection: String, CaseIterable, Identifiable {
+        case audio = "Audio"
+        case midi = "MIDI"
+        case appearance = "Appearance"
+
+        var id: String { rawValue }
+
+        var systemImage: String {
+            switch self {
+            case .audio: return "speaker.wave.2"
+            case .midi: return "pianokeys"
+            case .appearance: return "paintpalette"
+            }
+        }
+    }
+
     @Published private(set) var engineState: EngineState = .stopped
     @Published private(set) var currentComponent: AVAudioUnitComponent?
     @Published private(set) var pluginViewController: NSViewController?
@@ -62,7 +78,12 @@ final class PluginHostSession: ObservableObject {
     }
     @Published var inspectorSection: InspectorSection = .io
     @Published var isShowingHelp = false
+    @Published var isShowingSettings = false
+    @Published var settingsSection: SettingsSection = .audio
     @Published var exportedParameterJSON: String = ""
+    /// Last failed load component name (for canvas retry).
+    @Published private(set) var lastFailedPluginName: String?
+    private var lastFailedComponent: AVAudioUnitComponent?
     
     // Parameter analysis cache
     @Published private(set) var analyzedParameters: ParameterAnalysis?
@@ -370,6 +391,8 @@ final class PluginHostSession: ObservableObject {
             factoryPresets = []
             currentPresetName = nil
             lastErrorDescription = nil
+            lastFailedPluginName = nil
+            lastFailedComponent = nil
             
             // Debug: Log component details before loading
             let desc = component.audioComponentDescription
@@ -411,6 +434,8 @@ final class PluginHostSession: ObservableObject {
             pluginViewController = nil
             let errorMessage = error.localizedDescription
             lastErrorDescription = errorMessage
+            lastFailedPluginName = component.name
+            lastFailedComponent = component
             engineState = .error(errorMessage)
             
             // Log detailed error for debugging
@@ -655,6 +680,60 @@ final class PluginHostSession: ObservableObject {
             engineManager.stopEngine()
         } else {
             try? engineManager.startEngine()
+        }
+    }
+
+    func openSettings(section: SettingsSection = .audio) {
+        settingsSection = section
+        isShowingSettings = true
+    }
+
+    func clearLoadError() {
+        lastErrorDescription = nil
+        lastFailedPluginName = nil
+        lastFailedComponent = nil
+        if case .error = engineState {
+            engineState = engineManager.isRunning ? .running : .stopped
+        }
+    }
+
+    func retryLastFailedPlugin() async {
+        guard let component = lastFailedComponent else { return }
+        await load(component: component)
+    }
+
+    /// Available sample rates for the current output device (or defaults).
+    var availableOutputSampleRates: [Double] {
+        guard let device = selectedOutputDevice else {
+            return [44_100, 48_000, 88_200, 96_000]
+        }
+        return audioDeviceManager.availableSampleRates(for: device.id)
+    }
+
+    var outputBufferFrameSize: UInt32? {
+        guard let device = selectedOutputDevice else { return nil }
+        return audioDeviceManager.bufferFrameSize(for: device.id)
+    }
+
+    func setOutputSampleRate(_ rate: Double) {
+        guard let device = selectedOutputDevice else {
+            lastErrorDescription = "Choose an output device in Settings before changing sample rate."
+            return
+        }
+        do {
+            let wasRunning = engineManager.isRunning
+            if wasRunning { engineManager.stopEngine() }
+            try audioDeviceManager.setNominalSampleRate(rate, for: device.id)
+            // Give CoreAudio a moment, then rebuild / restart
+            try? engineManager.setOutputDevice(device)
+            if wasRunning || currentComponent != nil {
+                try engineManager.startEngine()
+            }
+            refreshMetrics()
+            clearLoadError()
+        } catch {
+            lastErrorDescription = error.localizedDescription
+            engineState = .error(error.localizedDescription)
         }
     }
 

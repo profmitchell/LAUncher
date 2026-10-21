@@ -34,7 +34,7 @@ struct TopBarView: View {
                         titleArea
                         Spacer()
                         actionButtons
-                        inspectorToggleButton
+                        settingsButton
                         helpButton
                     }
                     HStack(spacing: 16) {
@@ -48,7 +48,7 @@ struct TopBarView: View {
                         titleArea
                         Spacer(minLength: 12)
                         actionButtons
-                        inspectorToggleButton
+                        settingsButton
                         helpButton
                         moreMenu
                     }
@@ -84,11 +84,11 @@ struct TopBarView: View {
         }
     }
 
-    private var inspectorToggleButton: some View {
-        toolbarButton(icon: "sidebar.right", label: "Inspect", isActive: session.isShowingInspector) {
-            session.isShowingInspector.toggle()
+    private var settingsButton: some View {
+        toolbarButton(icon: "gearshape", label: "Settings", isActive: session.isShowingSettings) {
+            session.openSettings()
         }
-        .help(session.isShowingInspector ? "Hide Inspector" : "Show Inspector")
+        .help("Audio, MIDI, and appearance (⌘,)")
     }
 
     private var helpButton: some View {
@@ -120,29 +120,17 @@ struct TopBarView: View {
                 Button("Clear Default", systemImage: "star.slash") { session.clearDefaultPlugin() }
             }
             Divider()
-            if session.isShowingInspector {
-                Button("Hide Inspector", systemImage: "sidebar.right") {
-                    session.isShowingInspector = false
-                }
-            } else {
-                Button("Show Inspector", systemImage: "sidebar.right") {
-                    session.isShowingInspector = true
-                }
+            Button("Settings…", systemImage: "gearshape") {
+                session.openSettings()
             }
-            Divider()
-            Menu("Theme", systemImage: "paintpalette") {
-                ForEach(session.themeManager.availableThemes) { theme in
-                    Button {
-                        session.themeManager.currentTheme = theme
-                    } label: {
-                        HStack {
-                            Text(theme.name)
-                            if session.themeManager.currentTheme.id == theme.id {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
-                }
+            .keyboardShortcut(",", modifiers: .command)
+            Button {
+                session.isShowingInspector.toggle()
+            } label: {
+                Label(
+                    session.isShowingInspector ? "Hide Side Panel" : "Show Side Panel",
+                    systemImage: "sidebar.right"
+                )
             }
             Divider()
             Button {

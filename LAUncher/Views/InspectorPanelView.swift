@@ -54,13 +54,21 @@ struct InspectorPanelView: View {
 
     private var ioView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Audio Devices").font(.headline)
+            Text("Quick I/O").font(.headline)
+            Text("For full controls (sample rate, clearer device names), use Settings…")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button("Open Settings…") {
+                session.openSettings(section: .audio)
+            }
+            .buttonStyle(.borderedProminent)
+
             HStack {
                 Text("Input").frame(width: 60, alignment: .leading)
                 Picker("Input", selection: $session.selectedInputDevice) {
                     Text("None").tag(Optional<AudioDevice>.none)
                     ForEach(session.inputDevices) { device in
-                        Text(device.name).tag(Optional(device))
+                        Text(device.displayName).tag(Optional(device))
                     }
                 }
                 .pickerStyle(.menu)
@@ -71,7 +79,7 @@ struct InspectorPanelView: View {
                 Picker("Output", selection: $session.selectedOutputDevice) {
                     Text("None").tag(Optional<AudioDevice>.none)
                     ForEach(session.outputDevices) { device in
-                        Text(device.name).tag(Optional(device))
+                        Text(device.displayName).tag(Optional(device))
                     }
                 }
                 .pickerStyle(.menu)

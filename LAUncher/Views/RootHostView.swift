@@ -95,6 +95,15 @@ struct RootHostView: View {
         .sheet(isPresented: $session.isShowingHelp) {
             HelpView(session: session)
         }
+        .sheet(isPresented: $session.isShowingSettings) {
+            SettingsView(session: session)
+        }
+        .background {
+            Button("") { session.openSettings() }
+                .keyboardShortcut(",", modifiers: .command)
+                .opacity(0)
+                .allowsHitTesting(false)
+        }
         .onChange(of: session.isShowingChat) {
             Task { @MainActor in
                 if session.isShowingChat {

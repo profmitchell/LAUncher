@@ -121,27 +121,14 @@ final class AudioEngineManager: ObservableObject {
         installHostSync(on: newNode.auAudioUnit)
 
         let needsAudioInput = pluginType == kAudioUnitType_Effect || pluginType == kAudioUnitType_MusicEffect
-        do {
-            try wirePluginGraph(plugin: newNode, pluginType: pluginType)
-            configureMainMixerConnection()
-            try startEngine()
-        } catch {
-            if needsAudioInput {
-                // Fallback: ignore hardware input and feed a stereo test tone into the FX.
-                print("⚠️ FX graph/start failed (\(error.localizedDescription)); retrying with test tone only")
-                inputNode = nil
-                clearToneGenerator()
-                engine.disconnectNodeInput(newNode)
-                let outs = engine.outputConnectionPoints(for: newNode, outputBus: 0)
-                for connection in outs {
-                    if let target = connection.node {
-                        engine.disconnectNodeInput(target, bus: connection.bus)
-                    }
-                }
-                try wirePluginGraph(plugin: newNode, pluginType: pluginType)
+        if needsAudioInput {
+            try startEffectGraphTryingFormats(plugin: newNode)
+        } else {
+            do {
+                try wirePluginGraph(plugin: newNode, pluginType: pluginType, preferredFormat: nil)
                 configureMainMixerConnection()
                 try startEngine()
-            } else {
+            } catch {
                 disconnectInputFromGraph()
                 configureMainMixerConnection()
                 try startEngine()
@@ -149,6 +136,85 @@ final class AudioEngineManager: ObservableObject {
         }
 
         return newNode
+    }
+
+    /// Try several bus formats so picky Music FX (Ohmicide, etc.) can load.
+    private func startEffectGraphTryingFormats(plugin: AVAudioUnit) throws {
+        let candidates = effectFormatCandidates(for: plugin)
+        var lastError: Error?
+
+        for (index, format) in candidates.enumerated() {
+            do {
+                resetEffectConnections(plugin: plugin)
+                // Later candidates force test-tone only (avoids aggregate input channel fights).
+                forceToneOnlyForEffect = index >= 3
+                if forceToneOnlyForEffect {
+                    inputNode = nil
+                }
+                try wirePluginGraph(plugin: plugin, pluginType: currentPluginType, preferredFormat: format)
+                configureMainMixerConnection()
+                try startEngine()
+                forceToneOnlyForEffect = false
+                print("✅ FX graph started with format candidate #\(index): \(describeFormat(format))")
+                return
+            } catch {
+                lastError = error
+                forceToneOnlyForEffect = false
+                print("⚠️ FX format candidate #\(index) failed (\(describeFormat(format))): \(error.localizedDescription)")
+                stopEngine()
+            }
+        }
+
+        throw lastError ?? Self.friendlyNSError(
+            status: kAudioUnitErr_FormatNotSupported,
+            fallback: "This effect rejected the current device format — open Settings and try 48 kHz or a different output."
+        )
+    }
+
+    private func resetEffectConnections(plugin: AVAudioUnit) {
+        clearToneGenerator()
+        engine.disconnectNodeInput(plugin)
+        let outs = engine.outputConnectionPoints(for: plugin, outputBus: 0)
+        for connection in outs {
+            if let target = connection.node {
+                engine.disconnectNodeInput(target, bus: connection.bus)
+            }
+        }
+        disconnectInputFromGraph()
+    }
+
+    private func effectFormatCandidates(for plugin: AVAudioUnit) -> [AVAudioFormat?] {
+        var list: [AVAudioFormat?] = [nil] // let AVAudioEngine negotiate first
+
+        let outHW = engine.outputNode.outputFormat(forBus: 0)
+        if outHW.channelCount > 0 { list.append(outHW) }
+
+        let pluginOut = plugin.outputFormat(forBus: 0)
+        if pluginOut.channelCount > 0 { list.append(pluginOut) }
+
+        let sr = outHW.sampleRate > 0 ? outHW.sampleRate : 48_000
+        if let stereo = AVAudioFormat(standardFormatWithSampleRate: sr, channels: 2) {
+            list.append(stereo)
+        }
+        if let mono = AVAudioFormat(standardFormatWithSampleRate: sr, channels: 1) {
+            list.append(mono)
+        }
+        // Explicit non-interleaved float stereo (common AU bus layout)
+        if let floatStereo = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: sr,
+            channels: 2,
+            interleaved: false
+        ) {
+            list.append(floatStereo)
+        }
+
+        return list
+    }
+
+    private func describeFormat(_ format: AVAudioFormat?) -> String {
+        guard let format else { return "nil (negotiate)" }
+        return "\(format.sampleRate) Hz · \(format.channelCount) ch"
     }
 
     private func clearToneGenerator() {
@@ -167,45 +233,38 @@ final class AudioEngineManager: ObservableObject {
         currentPluginType == kAudioUnitType_Effect || currentPluginType == kAudioUnitType_MusicEffect
     }
 
-    /// Stereo host format used for FX chains (Music Effects like Pro-Q need a valid bus format).
-    private func hostStereoFormat() -> AVAudioFormat {
-        let sr = engine.outputNode.outputFormat(forBus: 0).sampleRate
-        let rate = sr > 0 ? sr : 48_000
-        return AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2)
-            ?? AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: rate, channels: 2, interleaved: false)!
-    }
-
     /// Build plugin → mixer (and input/tone → plugin for FX only). Never route mic into instrument graphs.
-    private func wirePluginGraph(plugin: AVAudioUnit, pluginType: OSType) throws {
+    private func wirePluginGraph(plugin: AVAudioUnit, pluginType: OSType, preferredFormat: AVAudioFormat?) throws {
         let mixer = engine.mainMixerNode
-        let stereo = hostStereoFormat()
-
         let needsAudioInput = pluginType == kAudioUnitType_Effect || pluginType == kAudioUnitType_MusicEffect
+
         if needsAudioInput {
-            // Prefer hardware input when the user selected one; otherwise feed a test tone.
-            if inputNode == nil, preferredInputDeviceID != nil {
+            if !forceToneOnlyForEffect, inputNode == nil, preferredInputDeviceID != nil {
                 inputNode = engine.inputNode
                 if let id = preferredInputDeviceID {
                     try? setCurrentDevice(id, on: engine.inputNode)
                 }
             }
 
-            if let input = inputNode {
+            // Prefer an explicit format; otherwise nil lets the engine negotiate.
+            let linkFormat: AVAudioFormat? = preferredFormat
+
+            if let input = inputNode, !forceToneOnlyForEffect {
                 let inFormat = input.outputFormat(forBus: 0)
-                let format = inFormat.channelCount > 0 ? inFormat : stereo
-                engine.connect(input, to: plugin, format: format)
+                let srcFormat = linkFormat ?? (inFormat.channelCount > 0 ? inFormat : nil)
+                engine.connect(input, to: plugin, format: srcFormat)
             } else {
                 let (generator, phase) = createToneGenerator()
                 engine.attach(generator)
-                engine.connect(generator, to: plugin, format: stereo)
+                engine.connect(generator, to: plugin, format: linkFormat)
                 toneGenerator = generator
                 toneGeneratorPhase = phase
             }
-            engine.connect(plugin, to: mixer, format: stereo)
+            engine.connect(plugin, to: mixer, format: linkFormat)
         } else {
             disconnectInputFromGraph()
             let mixerFormat = mixer.inputFormat(forBus: 0)
-            let format = mixerFormat.channelCount > 0 ? mixerFormat : stereo
+            let format = preferredFormat ?? (mixerFormat.channelCount > 0 ? mixerFormat : nil)
             engine.connect(plugin, to: mixer, format: format)
         }
     }
@@ -461,6 +520,8 @@ final class AudioEngineManager: ObservableObject {
     }
 
     private var preferredInputDeviceID: AudioDeviceID?
+    /// When true, FX graphs skip hardware input and use the test tone (format fallbacks).
+    private var forceToneOnlyForEffect = false
 
     /// Set HAL CurrentDevice on this engine node only — do not change macOS system defaults.
     private func setCurrentDevice(_ deviceID: AudioDeviceID, on node: AVAudioNode) throws {
@@ -512,7 +573,7 @@ final class AudioEngineManager: ObservableObject {
         case -1:
             message = "Audio operation failed (OSStatus −1). For Music Effects like Pro-Q, try Rescan, then load again."
         case kAudioUnitErr_FormatNotSupported:
-            message = "Plugin format not supported by the current device sample rate/channel count."
+            message = "This effect rejected the current device format — open Settings and try 48 kHz or a different output."
         case kAudioUnitErr_FailedInitialization:
             message = "Plugin failed to initialize. Quit other hosts using it and try again."
         default:
@@ -536,7 +597,11 @@ final class AudioEngineManager: ObservableObject {
                 }
             }
             engine.disconnectNodeInput(plugin)
-            try wirePluginGraph(plugin: plugin, pluginType: currentPluginType)
+            if pluginNeedsAudioInput {
+                try startEffectGraphTryingFormats(plugin: plugin)
+            } else {
+                try wirePluginGraph(plugin: plugin, pluginType: currentPluginType, preferredFormat: nil)
+            }
         } else {
             disconnectInputFromGraph()
         }

@@ -9,6 +9,32 @@ struct AudioDevice: Identifiable, Equatable, Hashable {
     let isInput: Bool
     let isOutput: Bool
     let channels: Int
+    /// Channels on the input scope (when known).
+    let inputChannels: Int
+
+    /// Human-readable label for menus (strips CoreAudio noise, adds channel hint).
+    var displayName: String {
+        var cleaned = name
+        if cleaned.hasPrefix("CADefaultDevice/") {
+            cleaned = String(cleaned.dropFirst("CADefaultDevice/".count))
+        }
+        if cleaned.lowercased().hasPrefix("aggregate") {
+            cleaned = "Aggregate Device"
+        }
+        // Truncate very long UID-looking tails
+        if cleaned.count > 40, let dash = cleaned.lastIndex(of: "-") {
+            let head = cleaned[..<dash]
+            if head.count >= 8 { cleaned = String(head) }
+        }
+
+        if isInput && isOutput {
+            return "\(cleaned) (\(inputChannels) in / \(channels) out)"
+        }
+        if isInput {
+            return "\(cleaned) (\(max(inputChannels, channels)) ch in)"
+        }
+        return "\(cleaned) (\(channels) ch)"
+    }
     
     static func == (lhs: AudioDevice, rhs: AudioDevice) -> Bool {
         lhs.id == rhs.id
@@ -198,50 +224,116 @@ final class AudioDeviceManager: ObservableObject {
             hasOutput = true
         }
         
-        // Get channel count for output
-        var channelCount = 2 // Default to stereo
-        if hasOutput {
-            propertyAddress.mSelector = kAudioDevicePropertyStreamConfiguration
-            propertyAddress.mScope = kAudioDevicePropertyScopeOutput
-            dataSize = 0
-            status = AudioObjectGetPropertyDataSize(
-                deviceID,
-                &propertyAddress,
-                0,
-                nil,
-                &dataSize
-            )
-            if status == noErr && dataSize > 0 {
-                let bufferListPtr = UnsafeMutablePointer<AudioBufferList>.allocate(capacity: Int(dataSize))
-                defer { bufferListPtr.deallocate() }
-                status = AudioObjectGetPropertyData(
-                    deviceID,
-                    &propertyAddress,
-                    0,
-                    nil,
-                    &dataSize,
-                    bufferListPtr
-                )
-                if status == noErr {
-                    var totalChannels = 0
-                    // Access the first buffer (most devices have one buffer with multiple channels)
-                    withUnsafePointer(to: &bufferListPtr.pointee.mBuffers) { buffersPtr in
-                        if bufferListPtr.pointee.mNumberBuffers > 0 {
-                            totalChannels = Int(buffersPtr.pointee.mNumberChannels)
-                        }
-                    }
-                    channelCount = max(totalChannels, 2)
-                }
-            }
-        }
-        
+        let outputChannels = channelCount(for: deviceID, scope: kAudioDevicePropertyScopeOutput)
+        let inputChannels = channelCount(for: deviceID, scope: kAudioDevicePropertyScopeInput)
+
         return AudioDevice(
             id: deviceID,
             name: name,
             isInput: hasInput,
             isOutput: hasOutput,
-            channels: channelCount
+            channels: max(outputChannels, hasOutput ? 2 : 0),
+            inputChannels: max(inputChannels, hasInput ? 1 : 0)
         )
+    }
+
+    private func channelCount(for deviceID: AudioDeviceID, scope: AudioObjectPropertyScope) -> Int {
+        var propertyAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreamConfiguration,
+            mScope: scope,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var dataSize: UInt32 = 0
+        var status = AudioObjectGetPropertyDataSize(deviceID, &propertyAddress, 0, nil, &dataSize)
+        guard status == noErr, dataSize > 0 else { return 0 }
+
+        let bufferListPtr = UnsafeMutablePointer<UInt8>.allocate(capacity: Int(dataSize))
+        defer { bufferListPtr.deallocate() }
+        status = AudioObjectGetPropertyData(deviceID, &propertyAddress, 0, nil, &dataSize, bufferListPtr)
+        guard status == noErr else { return 0 }
+
+        return bufferListPtr.withMemoryRebound(to: AudioBufferList.self, capacity: 1) { abl in
+            let buffers = UnsafeMutableAudioBufferListPointer(abl)
+            return buffers.reduce(0) { $0 + Int($1.mNumberChannels) }
+        }
+    }
+
+    // MARK: - Sample rate
+
+    func availableSampleRates(for deviceID: AudioDeviceID) -> [Double] {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyAvailableNominalSampleRates,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var dataSize: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(deviceID, &address, 0, nil, &dataSize) == noErr,
+              dataSize > 0 else {
+            return [44_100, 48_000, 88_200, 96_000]
+        }
+        let count = Int(dataSize) / MemoryLayout<AudioValueRange>.size
+        var ranges = [AudioValueRange](repeating: AudioValueRange(), count: count)
+        guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &dataSize, &ranges) == noErr else {
+            return [44_100, 48_000, 88_200, 96_000]
+        }
+
+        var rates = Set<Double>()
+        for range in ranges {
+            // Discrete rates usually have mMinimum == mMaximum
+            if range.mMinimum == range.mMaximum {
+                rates.insert(range.mMinimum)
+            } else {
+                for candidate in [44_100.0, 48_000.0, 88_200.0, 96_000.0, 176_400.0, 192_000.0] {
+                    if candidate >= range.mMinimum && candidate <= range.mMaximum {
+                        rates.insert(candidate)
+                    }
+                }
+            }
+        }
+        let sorted = rates.sorted()
+        return sorted.isEmpty ? [44_100, 48_000, 88_200, 96_000] : sorted
+    }
+
+    func nominalSampleRate(for deviceID: AudioDeviceID) -> Double {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var rate: Float64 = 0
+        var size = UInt32(MemoryLayout<Float64>.size)
+        let status = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &rate)
+        return status == noErr ? rate : 0
+    }
+
+    func setNominalSampleRate(_ rate: Double, for deviceID: AudioDeviceID) throws {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value = Float64(rate)
+        let size = UInt32(MemoryLayout<Float64>.size)
+        let status = AudioObjectSetPropertyData(deviceID, &address, 0, nil, size, &value)
+        guard status == noErr else {
+            throw NSError(
+                domain: "AudioDeviceManager",
+                code: Int(status),
+                userInfo: [NSLocalizedDescriptionKey: "Could not set sample rate to \(Int(rate)) Hz (OSStatus \(status))."]
+            )
+        }
+    }
+
+    func bufferFrameSize(for deviceID: AudioDeviceID) -> UInt32? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyBufferFrameSize,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var frames: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        let status = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &frames)
+        return status == noErr ? frames : nil
     }
     
     private func getDefaultInputDevice() -> AudioDevice? {
@@ -269,8 +361,9 @@ final class AudioDeviceManager: ObservableObject {
                 id: deviceID,
                 name: "\(device.name) (Default)",
                 isInput: true,
-                isOutput: false,
-                channels: device.channels
+                isOutput: device.isOutput,
+                channels: device.channels,
+                inputChannels: device.inputChannels
             )
         }
         
@@ -301,9 +394,10 @@ final class AudioDeviceManager: ObservableObject {
             return AudioDevice(
                 id: deviceID,
                 name: "\(device.name) (Default)",
-                isInput: false,
+                isInput: device.isInput,
                 isOutput: true,
-                channels: device.channels
+                channels: device.channels,
+                inputChannels: device.inputChannels
             )
         }
         
