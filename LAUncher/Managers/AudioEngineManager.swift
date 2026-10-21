@@ -132,13 +132,13 @@ final class AudioEngineManager: ObservableObject {
         // Store plugin type for routing decisions
         currentPluginType = pluginType
         
-        // Route based on plugin type
-        if pluginType == kAudioUnitType_Effect {
-            // Effects need input signal - check if we have input, otherwise use tone generator
+        // Route based on plugin type — effects / music effects need an audio input path
+        let needsAudioInput = pluginType == kAudioUnitType_Effect || pluginType == kAudioUnitType_MusicEffect
+        if needsAudioInput {
             if let input = inputNode {
                 engine.connect(input, to: newNode, format: input.outputFormat(forBus: 0))
             } else {
-                // No input device, use tone generator
+                // No input device, use tone generator so the FX graph still runs
                 let (generator, phase) = createToneGenerator()
                 engine.attach(generator)
                 engine.connect(generator, to: newNode, format: nil)
@@ -496,9 +496,9 @@ final class AudioEngineManager: ObservableObject {
         
         // Rebuild routing
         if let input = inputNode {
-            // Connect input to plugin if it's an effect
+            // Connect input to plugin if it's an effect / music effect
             if let plugin = instrumentNode,
-               currentPluginType == kAudioUnitType_Effect {
+               currentPluginType == kAudioUnitType_Effect || currentPluginType == kAudioUnitType_MusicEffect {
                 engine.connect(input, to: plugin, format: input.outputFormat(forBus: 0))
                 engine.connect(plugin, to: engine.mainMixerNode, format: nil)
             } else {

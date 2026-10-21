@@ -117,6 +117,3 @@ docs/screenshots/
 *.tmp
 *.temp
 *~
-
-
-scripts/notarize-launcher.sh

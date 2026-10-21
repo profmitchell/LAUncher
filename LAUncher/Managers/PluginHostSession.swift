@@ -24,7 +24,12 @@ final class PluginHostSession: ObservableObject {
     @Published private(set) var pluginViewController: NSViewController?
     @Published private(set) var availableInstruments: [AVAudioUnitComponent] = []
     @Published private(set) var availablePlugins: [AVAudioUnitComponent] = []
+    @Published private(set) var isRescanning = false
+    @Published private(set) var lastScanSummary: String = ""
+    @Published private(set) var lastScanDate: Date?
     @Published private(set) var lastErrorDescription: String?
+    private var registrationsObserver: NSObjectProtocol?
+    private var rescanTask: Task<Void, Never>?
     @Published private(set) var sampleRate: Double = 0
     @Published private(set) var bufferDuration: TimeInterval = 0
     @Published var bpm: Double = 120 {
@@ -39,14 +44,22 @@ final class PluginHostSession: ObservableObject {
     @Published var isMusicalTypingEnabled = false {
         didSet {
             musicalTypingManager.setKeyboardCaptureEnabled(isMusicalTypingEnabled)
+            persistMusicalTypingPreferences()
         }
     }
-    @Published var isMusicalTypingVisible = true
+    @Published var isMusicalTypingVisible = true {
+        didSet { persistMusicalTypingPreferences() }
+    }
     @Published var isShowingParameterExport = false
     @Published var isShowingMCPTools = false
     @Published var isShowingMIDIMap = false
     @Published var isShowingChat = false
-    @Published var isShowingInspector = false
+    @Published var isShowingInspector = false {
+        didSet {
+            guard !isLoadingPreferences else { return }
+            defaults.set(isShowingInspector, forKey: inspectorVisibleKey)
+        }
+    }
     @Published var inspectorSection: InspectorSection = .io
     @Published var isShowingHelp = false
     @Published var exportedParameterJSON: String = ""
@@ -83,6 +96,9 @@ final class PluginHostSession: ObservableObject {
             if midiManager.selectedSource != selectedMidiSource {
                 midiManager.selectedSource = selectedMidiSource
             }
+            if let id = selectedMidiSource?.id {
+                defaults.set(Int(id), forKey: midiSourceIDKey)
+            }
         }
     }
 
@@ -106,7 +122,8 @@ final class PluginHostSession: ObservableObject {
     init() {
         observeEngine()
         observeMidi()
-        refreshInstrumentList()
+        observeComponentRegistrations()
+        loadPersistedPreferences()
         refreshPluginList()
         loadRecentPlugins()
         refreshMetrics()
@@ -144,6 +161,9 @@ final class PluginHostSession: ObservableObject {
         musicalTypingManager.sendNoteOff = { [weak self] note in
             Task { @MainActor in self?.sendVirtualNoteOff(noteNumber: note) }
         }
+        musicalTypingManager.onPreferencesChanged = { [weak self] in
+            self?.persistMusicalTypingPreferences()
+        }
 
         // Attempt to auto-load default plugin after a short delay to ensure lists populated
         Task { @MainActor in
@@ -154,6 +174,13 @@ final class PluginHostSession: ObservableObject {
         // Initialize engine tempo and transport
         engineManager.setTempo(bpm)
         engineManager.setTransportPlaying(isTransportPlaying)
+    }
+
+    deinit {
+        if let registrationsObserver {
+            NotificationCenter.default.removeObserver(registrationsObserver)
+        }
+        rescanTask?.cancel()
     }
 
     // MARK: - Master Gain
@@ -185,33 +212,20 @@ final class PluginHostSession: ObservableObject {
         audioDeviceManager.outputDevices
     }
 
+    /// Kept for call sites that historically refreshed instruments only; now derives from the unified plugin list.
     func refreshInstrumentList() {
-        let instrumentDescription = AudioComponentDescription(
-            componentType: kAudioUnitType_MusicDevice,
-            componentSubType: 0,
-            componentManufacturer: 0,
-            componentFlags: 0,
-            componentFlagsMask: 0
-        )
-
-        let manager = AVAudioUnitComponentManager.shared()
-        let components = manager.components(matching: instrumentDescription)
-
-        availableInstruments = components.sorted(by: { (lhs: AVAudioUnitComponent, rhs: AVAudioUnitComponent) -> Bool in
-            let leftName = lhs.name
-            let rightName = rhs.name
-            return leftName.localizedCaseInsensitiveCompare(rightName) == .orderedAscending
-        })
+        availableInstruments = availablePlugins.filter {
+            $0.audioComponentDescription.componentType == kAudioUnitType_MusicDevice
+        }
     }
 
     func refreshPluginList() {
-        print("🔄 Rescanning plugins...")
         let manager = AVAudioUnitComponentManager.shared()
         var allComponents: [AVAudioUnitComponent] = []
-        
-        // Search for all AU types (both AU 2 and AUv3)
+
         let types: [OSType] = [
             kAudioUnitType_MusicDevice,
+            kAudioUnitType_MusicEffect,
             kAudioUnitType_Effect,
             kAudioUnitType_Generator,
             kAudioUnitType_Mixer,
@@ -219,7 +233,7 @@ final class PluginHostSession: ObservableObject {
             kAudioUnitType_FormatConverter,
             kAudioUnitType_OfflineEffect
         ]
-        
+
         for type in types {
             let description = AudioComponentDescription(
                 componentType: type,
@@ -228,49 +242,114 @@ final class PluginHostSession: ObservableObject {
                 componentFlags: 0,
                 componentFlagsMask: 0
             )
-            let components = manager.components(matching: description)
-            allComponents.append(contentsOf: components)
-            
-            // Debug logging
-            if !components.isEmpty {
-                print("Found \(components.count) plugins of type \(typeToString(type))")
-                for component in components.prefix(3) {
-                    // componentURL is deprecated, so we can't reliably detect AU 2 vs AUv3
-                    // Both types are discovered by AVAudioUnitComponentManager
-                    print("  - \(component.name) by \(component.manufacturerName)")
-                }
-            }
+            allComponents.append(contentsOf: manager.components(matching: description))
         }
-        
-        // Remove duplicates and sort
+
         var seenIDs = Set<String>()
         availablePlugins = allComponents
             .filter { component in
                 let desc = component.audioComponentDescription
                 let id = "\(desc.componentType)-\(desc.componentSubType)-\(desc.componentManufacturer)"
-                if seenIDs.contains(id) {
-                    return false
-                }
+                if seenIDs.contains(id) { return false }
                 seenIDs.insert(id)
                 return true
             }
-            .sorted(by: { (lhs: AVAudioUnitComponent, rhs: AVAudioUnitComponent) -> Bool in
-                let leftName = lhs.name
-                let rightName = rhs.name
-                return leftName.localizedCaseInsensitiveCompare(rightName) == .orderedAscending
-            })
-        
-        print("✅ Total unique plugins found: \(availablePlugins.count)")
-    }
-    
-    func rescanPlugins() {
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+
         refreshInstrumentList()
-        refreshPluginList()
+        lastScanDate = Date()
+        lastScanSummary = "\(availablePlugins.count) plugins"
+        print("✅ Plugin list: \(availablePlugins.count) unique")
     }
-    
+
+    /// Warm the AudioComponent registry, wait briefly for settle, then rebuild the list.
+    func rescanPlugins() {
+        guard !isRescanning else { return }
+        rescanTask?.cancel()
+        rescanTask = Task { @MainActor in
+            isRescanning = true
+            defer { isRescanning = false }
+
+            await Task.detached(priority: .userInitiated) {
+                Self.warmAudioComponentRegistry()
+            }.value
+
+            // Allow newly registered AUs (especially AUv3) to appear.
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+
+            refreshPluginList()
+            let formatter = DateFormatter()
+            formatter.timeStyle = .short
+            formatter.dateStyle = .none
+            let time = lastScanDate.map { formatter.string(from: $0) } ?? ""
+            lastScanSummary = "\(availablePlugins.count) plugins · rescanned \(time)"
+        }
+    }
+
+    private func observeComponentRegistrations() {
+        registrationsObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioUnitComponentManager.registrationsChangedNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, !self.isRescanning else { return }
+                self.refreshPluginList()
+            }
+        }
+    }
+
+    /// Walk the AudioComponent list so the system re-discovers newly installed units.
+    nonisolated private static func warmAudioComponentRegistry() {
+        var description = AudioComponentDescription(
+            componentType: 0,
+            componentSubType: 0,
+            componentManufacturer: 0,
+            componentFlags: 0,
+            componentFlagsMask: 0
+        )
+        var component: AudioComponent?
+        var walked = 0
+        while walked < 20_000 {
+            guard let next = AudioComponentFindNext(component, &description) else { break }
+            component = next
+            walked += 1
+        }
+
+        // Also poke each common type with an empty manufacturer/subtype match.
+        let types: [OSType] = [
+            kAudioUnitType_MusicDevice,
+            kAudioUnitType_MusicEffect,
+            kAudioUnitType_Effect,
+            kAudioUnitType_Generator,
+            kAudioUnitType_Mixer,
+            kAudioUnitType_Panner,
+            kAudioUnitType_FormatConverter,
+            kAudioUnitType_OfflineEffect
+        ]
+        for type in types {
+            var typed = AudioComponentDescription(
+                componentType: type,
+                componentSubType: 0,
+                componentManufacturer: 0,
+                componentFlags: 0,
+                componentFlagsMask: 0
+            )
+            var typedComponent: AudioComponent?
+            var typedWalked = 0
+            while typedWalked < 5_000 {
+                guard let next = AudioComponentFindNext(typedComponent, &typed) else { break }
+                typedComponent = next
+                typedWalked += 1
+            }
+        }
+    }
+
     private func typeToString(_ type: OSType) -> String {
         switch type {
         case kAudioUnitType_MusicDevice: return "MusicDevice (Instrument)"
+        case kAudioUnitType_MusicEffect: return "MusicEffect"
         case kAudioUnitType_Effect: return "Effect"
         case kAudioUnitType_Generator: return "Generator"
         case kAudioUnitType_Mixer: return "Mixer"
@@ -371,13 +450,78 @@ final class PluginHostSession: ObservableObject {
         engineState = .stopped
     }
 
-    // MARK: - Default Plugin Persistence
+    // MARK: - Persistence
     private let defaults = UserDefaults.standard
     private let defaultTypeKey = "DefaultPluginType"
     private let defaultSubTypeKey = "DefaultPluginSubType"
     private let defaultManuKey = "DefaultPluginManufacturer"
     private let defaultNameKey = "DefaultPluginName"
     private let recentPluginsKey = "RecentPlugins"
+    private let midiSourceIDKey = "SelectedMIDISourceID"
+    private let musicalTypingEnabledKey = "MusicalTypingEnabled"
+    private let musicalTypingVisibleKey = "MusicalTypingVisible"
+    private let musicalTypingOctaveKey = "MusicalTypingOctave"
+    private let musicalTypingVelocityKey = "MusicalTypingVelocity"
+    private let leftSidebarWidthKey = "LeftSidebarWidth"
+    private let rightSidebarWidthKey = "RightSidebarWidth"
+    private let inspectorVisibleKey = "InspectorVisible"
+
+    @Published var leftSidebarWidth: CGFloat = 320 {
+        didSet { defaults.set(Double(leftSidebarWidth), forKey: leftSidebarWidthKey) }
+    }
+    @Published var rightSidebarWidth: CGFloat = 420 {
+        didSet { defaults.set(Double(rightSidebarWidth), forKey: rightSidebarWidthKey) }
+    }
+
+    private var isLoadingPreferences = false
+
+    private func loadPersistedPreferences() {
+        isLoadingPreferences = true
+        defer { isLoadingPreferences = false }
+
+        if defaults.object(forKey: leftSidebarWidthKey) != nil {
+            leftSidebarWidth = CGFloat(defaults.double(forKey: leftSidebarWidthKey))
+        }
+        if defaults.object(forKey: rightSidebarWidthKey) != nil {
+            rightSidebarWidth = CGFloat(defaults.double(forKey: rightSidebarWidthKey))
+        }
+        if defaults.object(forKey: inspectorVisibleKey) != nil {
+            isShowingInspector = defaults.bool(forKey: inspectorVisibleKey)
+        }
+        if defaults.object(forKey: musicalTypingVisibleKey) != nil {
+            isMusicalTypingVisible = defaults.bool(forKey: musicalTypingVisibleKey)
+        }
+        if defaults.object(forKey: musicalTypingEnabledKey) != nil {
+            isMusicalTypingEnabled = defaults.bool(forKey: musicalTypingEnabledKey)
+        }
+        if defaults.object(forKey: musicalTypingOctaveKey) != nil {
+            musicalTypingManager.baseOctave = defaults.integer(forKey: musicalTypingOctaveKey)
+        }
+        if defaults.object(forKey: musicalTypingVelocityKey) != nil {
+            let v = defaults.integer(forKey: musicalTypingVelocityKey)
+            musicalTypingManager.velocity = UInt8(clamping: v)
+        }
+
+        // MIDI source restored after sources refresh in observeMidi / below
+        restoreSelectedMIDISource()
+    }
+
+    private func restoreSelectedMIDISource() {
+        let storedID = defaults.integer(forKey: midiSourceIDKey)
+        guard storedID != 0,
+              let match = midiManager.availableSources.first(where: { Int($0.id) == storedID }) else {
+            return
+        }
+        selectedMidiSource = match
+    }
+
+    func persistMusicalTypingPreferences() {
+        guard !isLoadingPreferences else { return }
+        defaults.set(isMusicalTypingEnabled, forKey: musicalTypingEnabledKey)
+        defaults.set(isMusicalTypingVisible, forKey: musicalTypingVisibleKey)
+        defaults.set(musicalTypingManager.baseOctave, forKey: musicalTypingOctaveKey)
+        defaults.set(Int(musicalTypingManager.velocity), forKey: musicalTypingVelocityKey)
+    }
 
     func setDefaultPlugin(_ component: AVAudioUnitComponent) {
         let desc = component.audioComponentDescription
@@ -599,6 +743,7 @@ final class PluginHostSession: ObservableObject {
         midiManager.$availableSources
             .sink { [weak self] _ in
                 guard let self else { return }
+                self.restoreSelectedMIDISource()
                 if self.selectedMidiSource == nil {
                     self.selectedMidiSource = self.midiManager.selectedSource
                 }

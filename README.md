@@ -48,6 +48,21 @@
 
 ## Installation
 
+### Pre-built (GitHub Releases)
+
+LAUncher is a **macOS app bundle** (`LAUncher.app`). Use a release asset that is **the app or a zip of the app** (for example `LAUncher-*-macos-arm64.app.zip` or a notarized **DMG**).
+
+- **Do not** run a bare `LAUncher` file from `Contents/MacOS/` by itself; Gatekeeper and the system expect the full `.app` (Info.plist, resources, code signature).
+- After unzipping: open **`LAUncher.app`** in Finder, run `open LAUncher.app` in Terminal, or drag the app to **Applications**.
+
+To produce a local copy of the bundle and a shareable zip from source:
+
+```bash
+./scripts/package-release-app.sh
+```
+
+Outputs under `build/dist/` (ignored by git): `LAUncher.app` and `LAUncher-<version>-macos-<arch>.app.zip`.
+
 ### Building from Source
 
 1. **Clone the repository:**

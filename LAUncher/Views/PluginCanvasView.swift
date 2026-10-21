@@ -38,15 +38,27 @@ struct PluginCanvasView: View {
                         }
                     )
             } else {
-                VStack(spacing: 12) {
+                VStack(spacing: 14) {
                     Image(systemName: "square.stack.3d.up")
                         .font(.system(size: 40, weight: .regular))
                         .foregroundStyle(.secondary)
-                    Text("Load an Audio Unit plugin to begin")
-                        .font(.title3)
+                    Text("Load Plugin")
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(LauncherChrome.textMain(theme))
+                    Text("Choose an Audio Unit instrument or effect to begin.")
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    Button {
+                        session.refreshPluginList()
+                        session.isShowingPluginPicker = true
+                    } label: {
+                        Label("Load Plugin…", systemImage: "plus.square.on.square")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
                 }
-                .padding()
+                .padding(24)
             }
         }
         .padding(.horizontal, 24)

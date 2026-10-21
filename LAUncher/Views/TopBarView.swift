@@ -100,7 +100,12 @@ struct TopBarView: View {
 
     private var moreMenu: some View {
         Menu {
-            Button("Rescan Plugins", systemImage: "arrow.clockwise") { session.rescanPlugins() }
+            Button {
+                session.rescanPlugins()
+            } label: {
+                Label(session.isRescanning ? "Rescanning…" : "Rescan Plugins", systemImage: "arrow.clockwise")
+            }
+            .disabled(session.isRescanning)
             Button("MCP Tools", systemImage: "wand.and.stars") { session.isShowingMCPTools = true }
             if session.currentComponent != nil {
                 Button("Unload Plugin", systemImage: "eject") { session.unloadCurrentInstrument() }
@@ -140,10 +145,18 @@ struct TopBarView: View {
                 }
             }
             Divider()
+            Button {
+                session.isMusicalTypingEnabled.toggle()
+            } label: {
+                Label(
+                    session.isMusicalTypingEnabled ? "Disable Musical Typing" : "Enable Musical Typing",
+                    systemImage: "keyboard"
+                )
+            }
             if session.isMusicalTypingVisible {
-                Button("Hide QWERTY Piano", systemImage: "eye.slash") { session.isMusicalTypingVisible = false }
+                Button("Hide Musical Typing", systemImage: "eye.slash") { session.isMusicalTypingVisible = false }
             } else {
-                Button("Show QWERTY Piano", systemImage: "eye") { session.isMusicalTypingVisible = true }
+                Button("Show Musical Typing", systemImage: "eye") { session.isMusicalTypingVisible = true }
             }
         } label: {
             toolbarLabel(icon: "ellipsis.circle", label: "More")

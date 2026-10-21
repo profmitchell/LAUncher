@@ -28,16 +28,26 @@ struct HelpView: View {
                         VStack(alignment: .leading, spacing: 12) {
                             helpItem(title: "Load a Plugin", description: "Click 'Load Plugin…' in the toolbar or left sidebar to browse and load Audio Unit plugins.")
                             helpItem(title: "Start Audio Engine", description: "Use the 'Start Audio' button in the left sidebar to begin audio processing.")
-                            helpItem(title: "Play Notes", description: "Enable QWERTY Piano or connect a MIDI controller to play notes through your plugin.")
+                            helpItem(title: "Play Notes", description: "Enable Musical Typing or connect a MIDI controller to play notes through your plugin.")
+                        }
+                    }
+
+                    section(title: "Musical Typing (Logic-style)", icon: "keyboard") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            helpItem(title: "Note keys", description: "A = C of the current octave. Whites: A S D F G H J K L ; '  ·  Blacks: W E T Y U O P")
+                            helpItem(title: "Octave", description: "Z = octave down, X = octave up, C = center on Middle C (same as Logic Musical Typing).")
+                            helpItem(title: "Sustain", description: "Tab toggles sustain/latch. Notes stay held until sustain is turned off.")
+                            helpItem(title: "Velocity", description: "Use the Vel slider, or press , / . to nudge velocity down / up. Typing is ignored while a text field is focused.")
                         }
                     }
                     
                     // Features
                     section(title: "Key Features", icon: "star.fill") {
                         VStack(alignment: .leading, spacing: 12) {
-                            helpItem(title: "QWERTY Piano", description: "Enable QWERTY Piano to use your QWERTY keyboard as a MIDI controller. The on-screen keyboard can be toggled and repositioned.")
+                            helpItem(title: "Musical Typing", description: "Logic Pro–style computer keyboard MIDI. Toggle from the left sidebar or More menu; drag the floating keyboard by its handle.")
                             helpItem(title: "MIDI Learn", description: "Map MIDI CC controllers to plugin parameters. Click 'MIDI Learn' in the sidebar, then click a parameter and move a MIDI control.")
                             helpItem(title: "BPM Sync", description: "Set the BPM in the left sidebar. When transport is playing, tempo-synced effects (like LFOs) will sync to the host BPM.")
+                            helpItem(title: "Rescan Plugins", description: "Use Rescan when you install new Audio Units. LAUncher refreshes the AudioComponent registry and updates the browser.")
                             helpItem(title: "Themes", description: "Choose from 11 built-in themes or create custom themes. Access from the 'More' menu → 'Theme'.")
                             helpItem(title: "Inspector Panel", description: "Toggle the right-side inspector to access audio device selection and MIDI input settings.")
                         }
@@ -57,7 +67,7 @@ struct HelpView: View {
                         VStack(alignment: .leading, spacing: 12) {
                             helpItem(title: "Default Plugin", description: "Set a plugin as default in the 'More' menu to auto-load it on launch.")
                             helpItem(title: "Resizable Toolbar", description: "Drag the handle at the bottom of the top toolbar to resize it.")
-                            helpItem(title: "Draggable Keyboard", description: "Drag the QWERTY Piano keyboard by its handle to reposition it and avoid overlapping plugin UIs.")
+                            helpItem(title: "Draggable Keyboard", description: "Drag the Musical Typing keyboard by its handle to reposition it and avoid overlapping plugin UIs.")
                             helpItem(title: "Master Gain", description: "Control master output volume using the slider in the bottom status bar.")
                         }
                     }
@@ -69,7 +79,7 @@ struct HelpView: View {
                                 .font(.headline)
                             Text("Developed and maintained by **Mitchell Cohen**")
                             Text("Professor of Sound Design & Production @ Berklee College of Music")
-                            Text("2025 Newton, MA")
+                            Text("2026 Newton, MA")
                             Text("All Rights Reserved")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)

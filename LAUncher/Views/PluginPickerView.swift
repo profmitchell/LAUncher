@@ -9,6 +9,7 @@ struct PluginPickerView: View {
     @State private var selectedScope: PluginScope = .all
     @State private var loadingComponent: AVAudioUnitComponent?
     @State private var errorMessage: String?
+    @State private var didApplyDefaultScope = false
 
     private enum PluginScope: String, CaseIterable, Identifiable {
         case all = "All"
@@ -21,7 +22,7 @@ struct PluginPickerView: View {
     }
 
     private var baseComponents: [AVAudioUnitComponent] {
-        let components = session.availablePlugins.isEmpty ? session.availableInstruments : session.availablePlugins
+        let components = session.availablePlugins
         switch selectedScope {
         case .all:
             return components
@@ -30,7 +31,10 @@ struct PluginPickerView: View {
         case .instruments:
             return components.filter { $0.audioComponentDescription.componentType == kAudioUnitType_MusicDevice }
         case .effects:
-            return components.filter { $0.audioComponentDescription.componentType == kAudioUnitType_Effect }
+            return components.filter {
+                let t = $0.audioComponentDescription.componentType
+                return t == kAudioUnitType_Effect || t == kAudioUnitType_MusicEffect
+            }
         case .generators:
             return components.filter { $0.audioComponentDescription.componentType == kAudioUnitType_Generator }
         }
@@ -66,6 +70,13 @@ struct PluginPickerView: View {
         }
         .frame(width: 880, height: 640)
         .background(.thinMaterial)
+        .onAppear {
+            guard !didApplyDefaultScope else { return }
+            didApplyDefaultScope = true
+            if !session.recentPlugins.isEmpty {
+                selectedScope = .recent
+            }
+        }
     }
 
     private var windowHeader: some View {
@@ -74,8 +85,16 @@ struct PluginPickerView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Load Audio Unit")
                         .font(.title2.weight(.semibold))
-                    Text("\(filteredComponents.count) available in \(selectedScope.rawValue.lowercased())")
-                        .foregroundStyle(.secondary)
+                    if session.isRescanning {
+                        Text("Rescanning Audio Units…")
+                            .foregroundStyle(.secondary)
+                    } else if !session.lastScanSummary.isEmpty {
+                        Text("\(filteredComponents.count) in \(selectedScope.rawValue.lowercased()) · \(session.lastScanSummary)")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("\(filteredComponents.count) available in \(selectedScope.rawValue.lowercased())")
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Spacer()
@@ -83,8 +102,17 @@ struct PluginPickerView: View {
                 Button {
                     session.rescanPlugins()
                 } label: {
-                    Label("Rescan", systemImage: "arrow.clockwise")
+                    if session.isRescanning {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Rescan")
+                        }
+                    } else {
+                        Label("Rescan", systemImage: "arrow.clockwise")
+                    }
                 }
+                .disabled(session.isRescanning)
 
                 Button("Close") {
                     dismiss()
@@ -200,6 +228,7 @@ struct PluginPickerView: View {
             Button("Rescan Plugins") {
                 session.rescanPlugins()
             }
+            .disabled(session.isRescanning)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -233,6 +262,7 @@ struct PluginPickerView: View {
     private func componentTypeLabel(_ component: AVAudioUnitComponent) -> String {
         switch component.audioComponentDescription.componentType {
         case kAudioUnitType_MusicDevice: return "Instrument"
+        case kAudioUnitType_MusicEffect: return "Music FX"
         case kAudioUnitType_Effect: return "Effect"
         case kAudioUnitType_Generator: return "Generator"
         case kAudioUnitType_Mixer: return "Mixer"

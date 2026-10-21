@@ -6,6 +6,7 @@ struct LeftSidebarView: View {
     @State private var pluginSearchText = ""
     @State private var selectedScope: SidebarPluginScope = .all
     @State private var loadingComponent: AVAudioUnitComponent?
+    @State private var didApplyDefaultScope = false
 
     private enum SidebarPluginScope: String, CaseIterable, Identifiable {
         case all = "All"
@@ -17,7 +18,7 @@ struct LeftSidebarView: View {
     }
 
     private var pluginSource: [AVAudioUnitComponent] {
-        let components = session.availablePlugins.isEmpty ? session.availableInstruments : session.availablePlugins
+        let components = session.availablePlugins
         switch selectedScope {
         case .all:
             return components
@@ -26,7 +27,10 @@ struct LeftSidebarView: View {
         case .instruments:
             return components.filter { $0.audioComponentDescription.componentType == kAudioUnitType_MusicDevice }
         case .effects:
-            return components.filter { $0.audioComponentDescription.componentType == kAudioUnitType_Effect }
+            return components.filter {
+                let t = $0.audioComponentDescription.componentType
+                return t == kAudioUnitType_Effect || t == kAudioUnitType_MusicEffect
+            }
         }
     }
 
@@ -89,11 +93,28 @@ struct LeftSidebarView: View {
                     Button {
                         session.rescanPlugins()
                     } label: {
-                        Image(systemName: "arrow.clockwise")
+                        if session.isRescanning {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                        }
                     }
                     .buttonStyle(.borderless)
                     .foregroundStyle(LauncherChrome.textMuted(theme))
+                    .disabled(session.isRescanning)
                     .help("Rescan plugins")
+                }
+
+                if session.isRescanning {
+                    Text("Rescanning…")
+                        .font(.caption2)
+                        .foregroundStyle(LauncherChrome.textMuted(theme))
+                } else if !session.lastScanSummary.isEmpty {
+                    Text(session.lastScanSummary)
+                        .font(.caption2)
+                        .foregroundStyle(LauncherChrome.textMuted(theme))
+                        .lineLimit(1)
                 }
 
                 HStack(spacing: 7) {
@@ -230,11 +251,18 @@ struct LeftSidebarView: View {
                 }
                 
                 Toggle(isOn: $session.isMusicalTypingEnabled) {
-                    Label("QWERTY Piano", systemImage: "keyboard")
+                    Label("Musical Typing", systemImage: "keyboard")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .toggleStyle(.button)
                 .buttonStyle(LauncherPillButtonStyle(theme: theme, isProminent: session.isMusicalTypingEnabled))
+                .help("Logic-style Musical Typing (A = C)")
+
+                if session.isMusicalTypingEnabled {
+                    Text("Oct \(session.musicalTypingManager.baseOctave) · Vel \(session.musicalTypingManager.velocity)")
+                        .font(.caption2)
+                        .foregroundStyle(LauncherChrome.textMuted(theme))
+                }
             }
             .padding(16)
             
@@ -243,6 +271,13 @@ struct LeftSidebarView: View {
         .frame(minWidth: 220, idealWidth: 320, maxWidth: 420)
         .background(LauncherChrome.panel(theme))
         .overlay(Rectangle().fill(LauncherChrome.border(theme)).frame(width: 1), alignment: .trailing)
+        .onAppear {
+            guard !didApplyDefaultScope else { return }
+            didApplyDefaultScope = true
+            if !session.recentPlugins.isEmpty {
+                selectedScope = .recent
+            }
+        }
     }
 
     private func load(_ component: AVAudioUnitComponent) {
@@ -258,6 +293,7 @@ struct LeftSidebarView: View {
     private func componentTypeLabel(_ component: AVAudioUnitComponent) -> String {
         switch component.audioComponentDescription.componentType {
         case kAudioUnitType_MusicDevice: return "Instrument"
+        case kAudioUnitType_MusicEffect: return "Music FX"
         case kAudioUnitType_Effect: return "Effect"
         case kAudioUnitType_Generator: return "Generator"
         case kAudioUnitType_Mixer: return "Mixer"
@@ -363,7 +399,7 @@ private struct SidebarPluginRow: View {
     private var systemImage: String {
         switch component.audioComponentDescription.componentType {
         case kAudioUnitType_MusicDevice: return "pianokeys"
-        case kAudioUnitType_Effect: return "slider.horizontal.3"
+        case kAudioUnitType_MusicEffect, kAudioUnitType_Effect: return "slider.horizontal.3"
         case kAudioUnitType_Generator: return "waveform"
         default: return "waveform.path"
         }

@@ -2,9 +2,11 @@ import Foundation
 import Combine
 import AppKit
 
+/// Logic Pro–style Musical Typing: A = C of the current octave, chromatic across the home row.
 @MainActor
 final class MusicalTypingManager: ObservableObject {
-    @Published var baseOctave: Int = 4
+    /// Octave where A plays C. Default 5 → A = MIDI 60 (Middle C).
+    @Published var baseOctave: Int = 5
     @Published var transpose: Int = 0
     @Published var velocity: UInt8 = 100
     @Published var isLatchSustainEnabled = false
@@ -15,17 +17,45 @@ final class MusicalTypingManager: ObservableObject {
     private var keyDownMonitor: Any?
     private var keyUpMonitor: Any?
 
-    // Map QWERTY keys to semitone offsets in the Z-M row
+    /// Logic Musical Typing chromatic map (A = C).
+    /// Whites: A S D F G H J K L ; '
+    /// Blacks: W E T Y U O P
     private let keyToSemitone: [Character: Int] = [
-        "z": 0, "s": 1, "x": 2, "d": 3, "c": 4, "v": 5, "g": 6,
-        "b": 7, "h": 8, "n": 9, "j": 10, "m": 11,
-        // Optional upper row as next octave
-        "q": 12, "2": 13, "w": 14, "3": 15, "e": 16, "r": 17, "5": 18,
-        "t": 19, "6": 20, "y": 21, "7": 22, "u": 23
+        "a": 0,  // C
+        "w": 1,  // C#
+        "s": 2,  // D
+        "e": 3,  // D#
+        "d": 4,  // E
+        "f": 5,  // F
+        "t": 6,  // F#
+        "g": 7,  // G
+        "y": 8,  // G#
+        "h": 9,  // A
+        "u": 10, // A#
+        "j": 11, // B
+        "k": 12, // C
+        "o": 13, // C#
+        "l": 14, // D
+        "p": 15, // D#
+        ";": 16, // E
+        "'": 17  // F
     ]
+
+    /// Ordered white-key labels for the on-screen Logic Musical Typing keyboard.
+    let whiteKeyLabels: [(label: String, semitone: Int)] = [
+        ("A", 0), ("S", 2), ("D", 4), ("F", 5), ("G", 7), ("H", 9), ("J", 11),
+        ("K", 12), ("L", 14), (";", 16), ("'", 17)
+    ]
+
+    let blackKeyLabels: [(label: String, semitone: Int)] = [
+        ("W", 1), ("E", 3), ("T", 6), ("Y", 8), ("U", 10), ("O", 13), ("P", 15)
+    ]
+
+    static let middleCOctave = 5
 
     var sendNoteOn: ((UInt8, UInt8) -> Void)?
     var sendNoteOff: ((UInt8) -> Void)?
+    var onPreferencesChanged: (() -> Void)?
 
     deinit {
         if let keyDownMonitor {
@@ -37,22 +67,48 @@ final class MusicalTypingManager: ObservableObject {
     }
 
     private func currentBaseNote() -> Int {
-        return 12 * baseOctave + transpose
+        12 * baseOctave + transpose
+    }
+
+    func noteNumber(forSemitone semitone: Int) -> UInt8 {
+        UInt8(clamping: currentBaseNote() + semitone)
     }
 
     func handleKeyDown(char: Character) {
         let c = Character(String(char).lowercased())
-        if c == "[" {
-            baseOctave = max(baseOctave - 1, 1)
+
+        // Logic: Z = octave down, X = octave up, C = center on Middle C
+        if c == "z" {
+            baseOctave = max(baseOctave - 1, 0)
+            onPreferencesChanged?()
             return
         }
-        if c == "]" {
+        if c == "x" {
             baseOctave = min(baseOctave + 1, 8)
+            onPreferencesChanged?()
             return
         }
+        if c == "c" {
+            baseOctave = Self.middleCOctave
+            onPreferencesChanged?()
+            return
+        }
+
+        // Velocity nudge: , down / . up (avoids conflicting with Logic note map)
+        if c == "," {
+            velocity = UInt8(max(1, Int(velocity) - 8))
+            onPreferencesChanged?()
+            return
+        }
+        if c == "." {
+            velocity = UInt8(min(127, Int(velocity) + 8))
+            onPreferencesChanged?()
+            return
+        }
+
         guard let semitone = keyToSemitone[c] else { return }
-        if activeKeys[c] != nil { return } // ignore repeats
-        let note = UInt8(currentBaseNote() + semitone)
+        if activeKeys[c] != nil { return }
+        let note = noteNumber(forSemitone: semitone)
         activeKeys[c] = note
         let wasAlreadyActive = activeNotes.contains(note)
         activeNotes.insert(note)
@@ -146,13 +202,19 @@ final class MusicalTypingManager: ObservableObject {
         }
     }
 
+    /// Returns nil to swallow the event, or the event to pass through.
     private func handle(event: NSEvent, isKeyDown: Bool) -> NSEvent? {
+        if Self.isTextInputFirstResponder() {
+            return event
+        }
+
         if event.modifierFlags.contains(.command) ||
             event.modifierFlags.contains(.control) ||
             event.modifierFlags.contains(.option) {
             return event
         }
 
+        // Tab = sustain / latch (Logic Musical Typing)
         if event.keyCode == 48 {
             if isKeyDown, !event.isARepeat {
                 toggleLatchSustain()
@@ -179,6 +241,24 @@ final class MusicalTypingManager: ObservableObject {
 
     private func handles(char: Character) -> Bool {
         let c = Character(String(char).lowercased())
-        return keyToSemitone[c] != nil || c == "[" || c == "]"
+        return keyToSemitone[c] != nil
+            || c == "z" || c == "x" || c == "c"
+            || c == "," || c == "."
+    }
+
+    /// Don't steal keys from search fields, BPM fields, chat, etc.
+    static func isTextInputFirstResponder() -> Bool {
+        guard let responder = NSApp.keyWindow?.firstResponder else { return false }
+        if responder is NSTextView || responder is NSTextField || responder is NSComboBox || responder is NSText {
+            return true
+        }
+        if let view = responder as? NSView {
+            var current: NSView? = view
+            while let c = current {
+                if c is NSTextField || c is NSTextView || c is NSComboBox { return true }
+                current = c.superview
+            }
+        }
+        return false
     }
 }

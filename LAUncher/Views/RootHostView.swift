@@ -7,18 +7,30 @@ struct RootHostView: View {
     @State private var chatWindow: NSWindow?
     @State private var topBarHeight: CGFloat = 84
     @State private var mtOffset: CGSize = CGSize(width: 0, height: -96)
-    @State private var leftSidebarWidth: CGFloat = 320
-    @State private var rightSidebarWidth: CGFloat = 420
+
+    private var leftSidebarWidth: Binding<CGFloat> {
+        Binding(
+            get: { session.leftSidebarWidth },
+            set: { session.leftSidebarWidth = $0 }
+        )
+    }
+
+    private var rightSidebarWidth: Binding<CGFloat> {
+        Binding(
+            get: { session.rightSidebarWidth },
+            set: { session.rightSidebarWidth = $0 }
+        )
+    }
     
     var body: some View {
         HStack(spacing: 0) {
             // Left Sidebar
             LeftSidebarView(session: session)
-                .frame(width: leftSidebarWidth)
+                .frame(width: session.leftSidebarWidth)
             
             // Resizable Divider
                 ResizableDivider(
-                    width: $leftSidebarWidth,
+                    width: leftSidebarWidth,
                     minWidth: 220,
                     maxWidth: 420,
                     isRightSide: false
@@ -54,14 +66,14 @@ struct RootHostView: View {
             if session.isShowingInspector {
                 // Resizable Divider
                 ResizableDivider(
-                    width: $rightSidebarWidth,
+                    width: rightSidebarWidth,
                     minWidth: 280,
                     maxWidth: 620,
                     isRightSide: true
                 )
                 
                 InspectorPanelView(session: session)
-                    .frame(width: rightSidebarWidth)
+                    .frame(width: session.rightSidebarWidth)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
