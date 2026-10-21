@@ -679,6 +679,12 @@ final class PluginHostSession: ObservableObject {
         engineManager.$isRunning
             .sink { [weak self] isRunning in
                 guard let self else { return }
+                // Don't clobber a sticky error with stopped/running until cleared.
+                if case .error = self.engineState, !isRunning { return }
+                if case .error = self.engineState, isRunning {
+                    self.engineState = .running
+                    return
+                }
                 self.engineState = isRunning ? .running : .stopped
             }
             .store(in: &cancellables)

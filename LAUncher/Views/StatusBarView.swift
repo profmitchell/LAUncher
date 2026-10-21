@@ -26,7 +26,15 @@ struct StatusBarView: View {
                     .frame(height: 16)
                 Label(message, systemImage: "exclamationmark.triangle.fill")
                     .foregroundColor(.yellow)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .help(message)
+            } else if let message = session.lastErrorDescription, session.currentComponent == nil {
+                Divider()
+                    .frame(height: 16)
+                Label(message, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundColor(.yellow)
+                    .lineLimit(2)
+                    .help(message)
             }
 
             Spacer()

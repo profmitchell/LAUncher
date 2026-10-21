@@ -51,9 +51,9 @@ final class AudioEngineManager: ObservableObject {
             isRunning = true
             lastError = nil
         } catch {
-            lastError = error
+            lastError = Self.friendlyError(from: error)
             isRunning = false
-            throw error
+            throw lastError ?? error
         }
     }
 
@@ -84,85 +84,140 @@ final class AudioEngineManager: ObservableObject {
     }
 
     func unloadPlugin() {
+        if engine.isRunning {
+            stopEngine()
+        }
         if let node = instrumentNode {
             engine.disconnectNodeInput(node)
             engine.detach(node)
         }
-        
-        if let generator = toneGenerator {
-            engine.disconnectNodeInput(generator)
-            engine.detach(generator)
-        }
-        
-        // Clean up phase memory
-        if let phase = toneGeneratorPhase {
-            phase.deallocate()
-            toneGeneratorPhase = nil
-        }
-
+        clearToneGenerator()
         instrumentNode = nil
         midiInstrument = nil
-        toneGenerator = nil
+        currentPluginType = 0
     }
 
     func loadPlugin(componentDescription: AudioComponentDescription, component: AVAudioUnitComponent? = nil) async throws -> AVAudioUnit {
         let pluginType = componentDescription.componentType
-        
+        let wasRunning = engine.isRunning
+        if wasRunning {
+            stopEngine()
+        }
+
         let newNode = try await instantiatePlugin(with: componentDescription, component: component)
 
-        // Unload existing plugin
+        // Unload existing plugin / tone gen
         if let existing = instrumentNode {
             engine.disconnectNodeInput(existing)
             engine.detach(existing)
         }
-        
+        clearToneGenerator()
+
+        engine.attach(newNode)
+        currentPluginType = pluginType
+        midiInstrument = newNode as? AVAudioUnitMIDIInstrument
+        instrumentNode = newNode
+
+        installHostSync(on: newNode.auAudioUnit)
+
+        let needsAudioInput = pluginType == kAudioUnitType_Effect || pluginType == kAudioUnitType_MusicEffect
+        do {
+            try wirePluginGraph(plugin: newNode, pluginType: pluginType)
+            configureMainMixerConnection()
+            try startEngine()
+        } catch {
+            if needsAudioInput {
+                // Fallback: ignore hardware input and feed a stereo test tone into the FX.
+                print("⚠️ FX graph/start failed (\(error.localizedDescription)); retrying with test tone only")
+                inputNode = nil
+                clearToneGenerator()
+                engine.disconnectNodeInput(newNode)
+                let outs = engine.outputConnectionPoints(for: newNode, outputBus: 0)
+                for connection in outs {
+                    if let target = connection.node {
+                        engine.disconnectNodeInput(target, bus: connection.bus)
+                    }
+                }
+                try wirePluginGraph(plugin: newNode, pluginType: pluginType)
+                configureMainMixerConnection()
+                try startEngine()
+            } else {
+                disconnectInputFromGraph()
+                configureMainMixerConnection()
+                try startEngine()
+            }
+        }
+
+        return newNode
+    }
+
+    private func clearToneGenerator() {
         if let existingGenerator = toneGenerator {
             engine.disconnectNodeInput(existingGenerator)
             engine.detach(existingGenerator)
         }
-        
-        // Clean up existing phase memory
         if let phase = toneGeneratorPhase {
             phase.deallocate()
             toneGeneratorPhase = nil
         }
+        toneGenerator = nil
+    }
 
-        engine.attach(newNode)
-        
-        // Store plugin type for routing decisions
-        currentPluginType = pluginType
-        
-        // Route based on plugin type — effects / music effects need an audio input path
+    private var pluginNeedsAudioInput: Bool {
+        currentPluginType == kAudioUnitType_Effect || currentPluginType == kAudioUnitType_MusicEffect
+    }
+
+    /// Stereo host format used for FX chains (Music Effects like Pro-Q need a valid bus format).
+    private func hostStereoFormat() -> AVAudioFormat {
+        let sr = engine.outputNode.outputFormat(forBus: 0).sampleRate
+        let rate = sr > 0 ? sr : 48_000
+        return AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2)
+            ?? AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: rate, channels: 2, interleaved: false)!
+    }
+
+    /// Build plugin → mixer (and input/tone → plugin for FX only). Never route mic into instrument graphs.
+    private func wirePluginGraph(plugin: AVAudioUnit, pluginType: OSType) throws {
+        let mixer = engine.mainMixerNode
+        let stereo = hostStereoFormat()
+
         let needsAudioInput = pluginType == kAudioUnitType_Effect || pluginType == kAudioUnitType_MusicEffect
         if needsAudioInput {
+            // Prefer hardware input when the user selected one; otherwise feed a test tone.
+            if inputNode == nil, preferredInputDeviceID != nil {
+                inputNode = engine.inputNode
+                if let id = preferredInputDeviceID {
+                    try? setCurrentDevice(id, on: engine.inputNode)
+                }
+            }
+
             if let input = inputNode {
-                engine.connect(input, to: newNode, format: input.outputFormat(forBus: 0))
+                let inFormat = input.outputFormat(forBus: 0)
+                let format = inFormat.channelCount > 0 ? inFormat : stereo
+                engine.connect(input, to: plugin, format: format)
             } else {
-                // No input device, use tone generator so the FX graph still runs
                 let (generator, phase) = createToneGenerator()
                 engine.attach(generator)
-                engine.connect(generator, to: newNode, format: nil)
+                engine.connect(generator, to: plugin, format: stereo)
                 toneGenerator = generator
                 toneGeneratorPhase = phase
             }
-            engine.connect(newNode, to: engine.mainMixerNode, format: nil)
+            engine.connect(plugin, to: mixer, format: stereo)
         } else {
-            // Instruments, generators, etc. connect directly to mixer
-            engine.connect(newNode, to: engine.mainMixerNode, format: nil)
+            disconnectInputFromGraph()
+            let mixerFormat = mixer.inputFormat(forBus: 0)
+            let format = mixerFormat.channelCount > 0 ? mixerFormat : stereo
+            engine.connect(plugin, to: mixer, format: format)
         }
-        
-        configureMainMixerConnection()
-        midiInstrument = newNode as? AVAudioUnitMIDIInstrument
-        instrumentNode = newNode
+    }
 
-        if !engine.isRunning {
-            try startEngine()
+    private func disconnectInputFromGraph() {
+        guard let input = inputNode else { return }
+        let connections = engine.outputConnectionPoints(for: input, outputBus: 0)
+        for connection in connections {
+            if let target = connection.node {
+                engine.disconnectNodeInput(target, bus: connection.bus)
+            }
         }
-
-        // Install host sync blocks so AUv3s can query tempo/transport
-        installHostSync(on: newNode.auAudioUnit)
-
-        return newNode
     }
 
     func loadInstrument(componentDescription: AudioComponentDescription) async throws -> AVAudioUnit {
@@ -223,26 +278,38 @@ final class AudioEngineManager: ObservableObject {
                 #endif
             }
             
-            // Try instantiation - empty options typically works for both AU 2 and AUv3
-            // AU 2 plugins may load in-process by default, AUv3 always out-of-process
-            let options: AudioComponentInstantiationOptions = []
-            
-            AVAudioUnit.instantiate(with: description, options: options) { auAudioUnit, error in
+            // Prefer out-of-process for third-party AUs (FabFilter Music FX, etc.) — more stable in hosts.
+            let primary: AudioComponentInstantiationOptions = .loadOutOfProcess
+            AVAudioUnit.instantiate(with: description, options: primary) { auAudioUnit, error in
                 if let auAudioUnit {
-                    print("   ✅ Instantiation successful")
+                    print("   ✅ Instantiation successful (out-of-process)")
                     continuation.resume(returning: auAudioUnit)
-                } else if let error = error {
-                    // If initial attempt fails, try logging additional info and report error
-                    // Capture values before async call to avoid concurrency warnings
-                    let capturedError = error
+                    return
+                }
+
+                // Retry in-process for older AU2 components that reject out-of-process.
+                AVAudioUnit.instantiate(with: description, options: []) { retryUnit, retryError in
+                    if let retryUnit {
+                        print("   ✅ Instantiation successful (in-process fallback)")
+                        continuation.resume(returning: retryUnit)
+                        return
+                    }
+                    let capturedError = retryError ?? error ?? NSError(
+                        domain: "AudioEngineManager",
+                        code: -1,
+                        userInfo: [NSLocalizedDescriptionKey: "Unknown error instantiating plugin"]
+                    )
                     let capturedDescription = description
                     let capturedComponent = component
                     Task { @MainActor [weak self] in
-                        guard let self = self else { return }
-                        self.handleInstantiationError(error: capturedError, description: capturedDescription, component: capturedComponent, continuation: continuation)
+                        guard let self else { return }
+                        self.handleInstantiationError(
+                            error: capturedError,
+                            description: capturedDescription,
+                            component: capturedComponent,
+                            continuation: continuation
+                        )
                     }
-                } else {
-                    continuation.resume(throwing: NSError(domain: "AudioEngineManager", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unknown error instantiating plugin"]))
                 }
             }
         }
@@ -269,15 +336,21 @@ final class AudioEngineManager: ObservableObject {
         // Provide more helpful error messages based on error codes
         switch errorCode {
         case -3000:
-            errorDescription = "Cannot instantiate plugin (error -3000). This is often caused by:\n• Missing entitlements: The app may need 'Disable Library Validation'\n• AUv3 app extension not properly installed\n• Plugin needs to be validated first\n• Try: auval -a to validate plugins, or check Xcode project entitlements"
+            errorDescription = "Cannot instantiate plugin (error -3000). Often missing entitlements (Disable Library Validation) or an AUv3 install issue. Try `auval -a`."
+        case -1:
+            errorDescription = "Plugin failed to open (OSStatus -1). Common with Music Effects if the component is busy, blocked by Gatekeeper, or needs a rescan. Try Rescan, then quit/reopen the plugin’s vendor app once."
+        case -10879:
+            errorDescription = "Audio graph error (Invalid Property / -10879). Usually a bad input/output format when loading an effect. Pick an output device in the Inspector and try again."
         case -10814:
-            errorDescription = "Plugin not found or not properly installed. Make sure the plugin is installed in /Library/Audio/Plug-Ins/Components/ or ~/Library/Audio/Plug-Ins/Components/"
+            errorDescription = "Plugin not found or not properly installed. Check /Library/Audio/Plug-Ins/Components/ or ~/Library/Audio/Plug-Ins/Components/"
         case -50:
             errorDescription = "Invalid plugin parameter. The plugin may be corrupted or incompatible."
         case -10810:
-            errorDescription = "Plugin validation failed. The plugin may be corrupted or incompatible with this version of macOS."
+            errorDescription = "Plugin validation failed. The plugin may be corrupted or incompatible with this macOS version."
         default:
-            errorDescription = nsError.localizedDescription.isEmpty ? "Unknown error (code: \(errorCode)). Domain: \(nsError.domain)" : nsError.localizedDescription
+            errorDescription = nsError.localizedDescription.isEmpty
+                ? "Unknown error (code: \(errorCode)). Domain: \(nsError.domain)"
+                : nsError.localizedDescription
         }
         
         print("   ❌ Instantiation failed with error code \(errorCode)")
@@ -342,178 +415,132 @@ final class AudioEngineManager: ObservableObject {
     }
 
     func setInputDevice(_ device: AudioDevice?) throws {
-        // Stop engine first
-        let wasRunning = isRunning
-        if isRunning {
-            stopEngine()
-        }
-        
-        // Configure input node
-        if let device = device {
-            // Set the input device using CoreAudio
-            var propertyAddress = AudioObjectPropertyAddress(
-                mSelector: kAudioHardwarePropertyDefaultInputDevice,
-                mScope: kAudioObjectPropertyScopeGlobal,
-                mElement: kAudioObjectPropertyElementMain
-            )
-            
-            var deviceID = device.id
-            let dataSize = UInt32(MemoryLayout<AudioDeviceID>.size)
-            let status = AudioObjectSetPropertyData(
-                AudioObjectID(kAudioObjectSystemObject),
-                &propertyAddress,
-                0,
-                nil,
-                dataSize,
-                &deviceID
-            )
-            
-            if status != noErr {
-                throw NSError(domain: "AudioEngineManager", code: Int(status), userInfo: [NSLocalizedDescriptionKey: "Failed to set input device"])
-            }
-            
-            // Input node will use the default input device
-            inputNode = engine.inputNode
+        let wasRunning = engine.isRunning
+        if wasRunning { stopEngine() }
+
+        if let device {
+            // Touching inputNode enables the input side of AVAudioEngine — only keep it
+            // when an effect needs audio in. Still record the preferred device for FX loads.
+            _ = engine.inputNode // ensure node exists
+            try setCurrentDevice(device.id, on: engine.inputNode)
+            inputNode = pluginNeedsAudioInput ? engine.inputNode : nil
+            preferredInputDeviceID = device.id
         } else {
+            preferredInputDeviceID = nil
             inputNode = nil
         }
-        
-        // Reconfigure routing
-        reconfigureRouting()
-        
-        // Restart if was running
+
+        try rebuildGraphKeepingPlugin()
         if wasRunning {
             try startEngine()
         }
     }
-    
+
     func setOutputDevice(_ device: AudioDevice?) throws {
-        // Stop engine first
-        let wasRunning = isRunning
-        if isRunning {
-            stopEngine()
-        }
-        
-        // Configure output device (primary stereo output)
-        // AVAudioEngine supports one hardware output. We map to system default output.
-        if let device = device {
-            var propertyAddress = AudioObjectPropertyAddress(
-                mSelector: kAudioHardwarePropertyDefaultOutputDevice,
-                mScope: kAudioObjectPropertyScopeGlobal,
-                mElement: kAudioObjectPropertyElementMain
-            )
-            
-            var deviceID = device.id
-            let dataSize = UInt32(MemoryLayout<AudioDeviceID>.size)
-            let status = AudioObjectSetPropertyData(
-                AudioObjectID(kAudioObjectSystemObject),
-                &propertyAddress,
-                0,
-                nil,
-                dataSize,
-                &deviceID
-            )
-            
-            if status != noErr {
-                throw NSError(domain: "AudioEngineManager", code: Int(status), userInfo: [NSLocalizedDescriptionKey: "Failed to set output device"])
-            }
+        let wasRunning = engine.isRunning
+        if wasRunning { stopEngine() }
+
+        if let device {
+            try setCurrentDevice(device.id, on: engine.outputNode)
+            outputNode1 = engine.outputNode
+            configureMainMixerConnection()
+            engine.mainMixerNode.outputVolume = masterGain
         } else {
-            // No output requested: effectively mute by disconnecting mixer from hardware
             let mainMixer = engine.mainMixerNode
             let output = engine.outputNode
             if engine.outputConnectionPoints(for: mainMixer, outputBus: 0).contains(where: { $0.node == output }) {
                 engine.disconnectNodeInput(output)
             }
-        }
-
-        outputNode1 = device != nil ? engine.outputNode : nil
-
-        // Ensure mixer/hardware wiring reflects current choice
-        if device != nil {
-            configureMainMixerConnection()
-            engine.mainMixerNode.outputVolume = masterGain
-        } else {
+            outputNode1 = nil
             engine.mainMixerNode.outputVolume = 0
         }
-        
-        // Restart if was running
+
         if wasRunning {
             try startEngine()
         }
     }
-    
-    private func reconfigureRouting() {
-        // Stop engine before reconfiguring
-        let wasRunning = isRunning
-        if isRunning {
-            stopEngine()
+
+    private var preferredInputDeviceID: AudioDeviceID?
+
+    /// Set HAL CurrentDevice on this engine node only — do not change macOS system defaults.
+    private func setCurrentDevice(_ deviceID: AudioDeviceID, on node: AVAudioNode) throws {
+        let unit: AudioUnit?
+        if let output = node as? AVAudioOutputNode {
+            unit = output.audioUnit
+        } else if let input = node as? AVAudioInputNode {
+            unit = input.audioUnit
+        } else {
+            unit = nil
         }
-        
-        // Disconnect all existing connections properly
-        // Disconnect plugin from mixer if it exists
+        guard let audioUnit = unit else {
+            throw Self.friendlyNSError(
+                status: kAudioUnitErr_InvalidProperty,
+                fallback: "Could not access audio unit for device selection."
+            )
+        }
+        var id = deviceID
+        let size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let status = AudioUnitSetProperty(
+            audioUnit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            0,
+            &id,
+            size
+        )
+        if status != noErr {
+            throw Self.friendlyNSError(status: status, fallback: "Failed to set audio device.")
+        }
+    }
+
+    private static func friendlyError(from error: Error) -> Error {
+        let ns = error as NSError
+        if ns.domain == NSOSStatusErrorDomain || ns.domain == "com.apple.coreaudio.avfaudio" {
+            return friendlyNSError(status: OSStatus(ns.code), fallback: ns.localizedDescription)
+        }
+        if ns.code == -10879 || ns.code == -1 {
+            return friendlyNSError(status: OSStatus(ns.code), fallback: ns.localizedDescription)
+        }
+        return error
+    }
+
+    private static func friendlyNSError(status: OSStatus, fallback: String) -> NSError {
+        let message: String
+        switch status {
+        case -10879:
+            message = "Audio graph error (−10879 Invalid Property). Check input/output devices, then reload the plugin."
+        case -1:
+            message = "Audio operation failed (OSStatus −1). For Music Effects like Pro-Q, try Rescan, then load again."
+        case kAudioUnitErr_FormatNotSupported:
+            message = "Plugin format not supported by the current device sample rate/channel count."
+        case kAudioUnitErr_FailedInitialization:
+            message = "Plugin failed to initialize. Quit other hosts using it and try again."
+        default:
+            message = fallback.isEmpty ? "Audio error (OSStatus \(status))." : fallback
+        }
+        return NSError(
+            domain: "AudioEngineManager",
+            code: Int(status),
+            userInfo: [NSLocalizedDescriptionKey: message]
+        )
+    }
+
+    private func rebuildGraphKeepingPlugin() throws {
+        clearToneGenerator()
         if let plugin = instrumentNode {
-            // Check if plugin is connected to mixer
-            let pluginConnections = engine.outputConnectionPoints(for: plugin, outputBus: 0)
-            for connection in pluginConnections {
-                if connection.node == engine.mainMixerNode {
-                    engine.disconnectNodeInput(engine.mainMixerNode, bus: connection.bus)
+            // Disconnect plugin outputs then rewire
+            let outs = engine.outputConnectionPoints(for: plugin, outputBus: 0)
+            for connection in outs {
+                if let target = connection.node {
+                    engine.disconnectNodeInput(target, bus: connection.bus)
                 }
             }
+            engine.disconnectNodeInput(plugin)
+            try wirePluginGraph(plugin: plugin, pluginType: currentPluginType)
+        } else {
+            disconnectInputFromGraph()
         }
-        
-        // Disconnect input node if it exists
-        if let input = inputNode {
-            // Disconnect any output connections from input
-            let inputConnections = engine.outputConnectionPoints(for: input, outputBus: 0)
-            for connection in inputConnections {
-                if let targetNode = connection.node {
-                    if targetNode == instrumentNode {
-                        // Disconnect from plugin
-                        engine.disconnectNodeInput(targetNode, bus: connection.bus)
-                    } else if targetNode == engine.mainMixerNode {
-                        // Disconnect from mixer
-                        engine.disconnectNodeInput(engine.mainMixerNode, bus: connection.bus)
-                    }
-                }
-            }
-        }
-        
-        // Disconnect tone generator if it exists
-        if let generator = toneGenerator {
-            let generatorConnections = engine.outputConnectionPoints(for: generator, outputBus: 0)
-            for connection in generatorConnections {
-                if let targetNode = connection.node {
-                    if targetNode == instrumentNode {
-                        // Disconnect from plugin
-                        engine.disconnectNodeInput(targetNode, bus: connection.bus)
-                    } else if targetNode == engine.mainMixerNode {
-                        // Disconnect from mixer
-                        engine.disconnectNodeInput(engine.mainMixerNode, bus: connection.bus)
-                    }
-                }
-            }
-        }
-        
-        // Rebuild routing
-        if let input = inputNode {
-            // Connect input to plugin if it's an effect / music effect
-            if let plugin = instrumentNode,
-               currentPluginType == kAudioUnitType_Effect || currentPluginType == kAudioUnitType_MusicEffect {
-                engine.connect(input, to: plugin, format: input.outputFormat(forBus: 0))
-                engine.connect(plugin, to: engine.mainMixerNode, format: nil)
-            } else {
-                // Connect input to mixer
-                engine.connect(input, to: engine.mainMixerNode, format: input.outputFormat(forBus: 0))
-            }
-        }
-        
-        // Ensure mixer is connected to output
         configureMainMixerConnection()
-        
-        // Restart if was running
-        if wasRunning {
-            try? startEngine()
-        }
     }
 
     private func configureMainMixerConnection() {
