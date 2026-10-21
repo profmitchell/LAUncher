@@ -5,6 +5,11 @@ enum LauncherChrome {
         theme.backgroundBottom.color
     }
 
+    /// Flat bar fill for top/status chrome (no glass stack).
+    static func barBackground(_ theme: AppTheme) -> Color {
+        theme.containerBackground.color.opacity(0.92)
+    }
+
     static func panel(_ theme: AppTheme) -> Color {
         theme.containerBackground.color.opacity(0.95)
     }

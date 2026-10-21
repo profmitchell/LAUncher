@@ -81,6 +81,13 @@ final class PluginHostSession: ObservableObject {
     @Published var isShowingSettings = false
     @Published var settingsSection: SettingsSection = .audio
     @Published var exportedParameterJSON: String = ""
+    /// Plugin library drawer (hidden by default once a plugin is loaded).
+    @Published var isLibraryVisible = true {
+        didSet {
+            guard !isLoadingPreferences else { return }
+            defaults.set(isLibraryVisible, forKey: libraryVisibleKey)
+        }
+    }
     /// Last failed load component name (for canvas retry).
     @Published private(set) var lastFailedPluginName: String?
     private var lastFailedComponent: AVAudioUnitComponent?
@@ -158,24 +165,7 @@ final class PluginHostSession: ObservableObject {
             selectedOutputDevice = audioDeviceManager.outputDevices.first
         }
         
-        // Start MCP HTTP server on port 5555 (on background thread to avoid blocking UI)
-        Task.detached(priority: .background) { [weak self] in
-            guard let self else { return }
-            await MainActor.run {
-                guard self.mcpServer == nil else {
-                    print("⚠️ MCP server already exists")
-                    return
-                }
-                let server = MCPServerManager(session: self)
-                self.mcpServer = server
-                do {
-                    try server.start()
-                } catch {
-                    print("❌ MCP HTTP server failed to start: \(error.localizedDescription)")
-                }
-            }
-        }
-        // Wire musical typing to send virtual notes
+        // Wire QWERTY Piano to send virtual notes
         musicalTypingManager.sendNoteOn = { [weak self] note, velocity in
             Task { @MainActor in self?.sendVirtualNoteOn(noteNumber: note, velocity: velocity) }
         }
@@ -420,6 +410,9 @@ final class PluginHostSession: ObservableObject {
             
             engineState = .running
             refreshPresetList()
+            // Plugin-first: get chrome out of the way
+            isLibraryVisible = false
+            isShowingInspector = false
             
             // Analyze parameters after successful load
             Task {
@@ -465,6 +458,7 @@ final class PluginHostSession: ObservableObject {
         engineManager.unloadPlugin()
         currentComponent = nil
         pluginViewController = nil
+        isLibraryVisible = true
         analyzedParameters = nil
         factoryPresets = []
         currentPresetName = nil
@@ -490,6 +484,7 @@ final class PluginHostSession: ObservableObject {
     private let leftSidebarWidthKey = "LeftSidebarWidth"
     private let rightSidebarWidthKey = "RightSidebarWidth"
     private let inspectorVisibleKey = "InspectorVisible"
+    private let libraryVisibleKey = "LibraryVisible"
 
     @Published var leftSidebarWidth: CGFloat = 320 {
         didSet { defaults.set(Double(leftSidebarWidth), forKey: leftSidebarWidthKey) }
@@ -510,8 +505,10 @@ final class PluginHostSession: ObservableObject {
         if defaults.object(forKey: rightSidebarWidthKey) != nil {
             rightSidebarWidth = CGFloat(defaults.double(forKey: rightSidebarWidthKey))
         }
-        if defaults.object(forKey: inspectorVisibleKey) != nil {
-            isShowingInspector = defaults.bool(forKey: inspectorVisibleKey)
+        // Side inspector is legacy; keep closed. Library follows preference if set.
+        isShowingInspector = false
+        if defaults.object(forKey: libraryVisibleKey) != nil {
+            isLibraryVisible = defaults.bool(forKey: libraryVisibleKey)
         }
         if defaults.object(forKey: musicalTypingVisibleKey) != nil {
             isMusicalTypingVisible = defaults.bool(forKey: musicalTypingVisibleKey)

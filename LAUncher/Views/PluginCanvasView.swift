@@ -3,15 +3,18 @@ import SwiftUI
 struct PluginCanvasView: View {
     @ObservedObject var session: PluginHostSession
     @ObservedObject var themeManager: ThemeManager
-    @Environment(\.colorScheme) private var colorScheme
-    
+
     init(session: PluginHostSession) {
         self.session = session
         self.themeManager = session.themeManager
     }
-    
+
     private var theme: AppTheme {
         themeManager.currentTheme
+    }
+
+    private var hasPlugin: Bool {
+        session.pluginViewController != nil
     }
 
     var body: some View {
@@ -21,66 +24,69 @@ struct PluginCanvasView: View {
             }
 
             ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(placeholderFill)
-                    .opacity(session.pluginViewController == nil ? 1 : 0)
-                    .animation(.easeInOut(duration: 0.2), value: session.pluginViewController == nil)
-
                 if let controller = session.pluginViewController {
                     PluginEditorContainer(viewController: controller, session: session)
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        .padding(12)
-                        .background(controllerBackground)
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        .overlay(
-                            Group {
-                                if session.midiMapManager.isInLearnMode {
-                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                        .stroke(Color.green.opacity(0.6), lineWidth: 3)
-                                        .padding(12)
-                                }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .overlay {
+                            if session.midiMapManager.isInLearnMode {
+                                Rectangle()
+                                    .stroke(Color.green.opacity(0.55), lineWidth: 2)
                             }
-                        )
-                } else {
-                    VStack(spacing: 14) {
-                        Image(systemName: "square.stack.3d.up")
-                            .font(.system(size: 40, weight: .regular))
-                            .foregroundStyle(.secondary)
-                        Text("Load Plugin")
-                            .font(.title2.weight(.semibold))
-                            .foregroundStyle(LauncherChrome.textMain(theme))
-                        Text("Pick a plugin from the left list, or click Load Plugin…")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                        Button {
-                            session.refreshPluginList()
-                            session.isShowingPluginPicker = true
-                        } label: {
-                            Label("Load Plugin…", systemImage: "plus.square.on.square")
                         }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-                    }
-                    .padding(24)
+                } else {
+                    emptyState
                 }
             }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 24)
-            .background(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(containerBackground)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .stroke(borderColor, lineWidth: 1)
-                    )
-                    .padding(16)
-            )
-            .padding(.horizontal, 16)
-            .padding(.top, session.lastErrorDescription == nil || session.currentComponent != nil ? 24 : 8)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(hasPlugin ? theme.canvasBackground.color : Color.clear)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(.easeInOut(duration: 0.2), value: themeManager.currentTheme.id)
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "waveform")
+                .font(.system(size: 36, weight: .light))
+                .foregroundStyle(LauncherChrome.textMuted(theme))
+
+            Text("Choose a plugin")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(LauncherChrome.textMain(theme))
+
+            Text(
+                session.isLibraryVisible
+                    ? "Select one from the library, or browse the full list."
+                    : "Open the library to pick an instrument or effect."
+            )
+            .font(.subheadline)
+            .foregroundStyle(LauncherChrome.textMuted(theme))
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: 360)
+
+            HStack(spacing: 10) {
+                if !session.isLibraryVisible {
+                    Button {
+                        session.isLibraryVisible = true
+                    } label: {
+                        Label("Show Library", systemImage: "sidebar.left")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                }
+
+                Button {
+                    session.refreshPluginList()
+                    session.isShowingPluginPicker = true
+                } label: {
+                    Label("Browse Plugins…", systemImage: "magnifyingglass")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+            }
+        }
+        .padding(32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func loadErrorBanner(_ message: String) -> some View {
@@ -101,7 +107,7 @@ struct PluginCanvasView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
-            Button("Open Settings") {
+            Button("Settings") {
                 session.openSettings(section: .audio)
             }
             .buttonStyle(.bordered)
@@ -119,27 +125,13 @@ struct PluginCanvasView: View {
             }
             .buttonStyle(.borderless)
         }
-        .padding(14)
+        .padding(12)
         .background(.yellow.opacity(0.12))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .padding(.horizontal, 28)
-        .padding(.top, 16)
-    }
-
-    private var placeholderFill: Color {
-        theme.placeholderFill.color
-    }
-
-    private var containerBackground: Color {
-        theme.containerBackground.color
-    }
-
-    private var borderColor: Color {
-        theme.containerBorder.color
-    }
-
-    private var controllerBackground: Color {
-        theme.canvasBackground.color
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.yellow.opacity(0.25))
+                .frame(height: 1)
+        }
     }
 }
 
@@ -150,9 +142,8 @@ private struct PluginEditorContainer: NSViewControllerRepresentable {
     var session: PluginHostSession
 
     func makeNSViewController(context: Context) -> NSViewController {
-        return viewController
+        viewController
     }
 
-    func updateNSViewController(_ nsViewController: NSViewController, context: Context) {
-    }
+    func updateNSViewController(_ nsViewController: NSViewController, context: Context) {}
 }

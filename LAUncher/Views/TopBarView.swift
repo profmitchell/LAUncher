@@ -1,172 +1,178 @@
 import SwiftUI
 import AVFAudio
 
+/// Slim host toolbar — identity, transport, and a few clear actions.
 struct TopBarView: View {
     @ObservedObject var session: PluginHostSession
     @ObservedObject var themeManager: ThemeManager
-    var expanded: Bool = false
-    @State private var showIOPopover = false
-    
-    init(session: PluginHostSession, expanded: Bool = false) {
+
+    init(session: PluginHostSession) {
         self.session = session
         self.themeManager = session.themeManager
-        self.expanded = expanded
     }
+
+    private var theme: AppTheme { themeManager.currentTheme }
 
     var body: some View {
-        VStack(spacing: 0) {
-            content
-                .padding(.horizontal, 16)
-                .padding(.vertical, expanded ? 12 : 8)
-        }
-        .background(LauncherChrome.glassBackground(themeManager.currentTheme))
-        .overlay(Rectangle().fill(LauncherChrome.border(themeManager.currentTheme)).frame(height: 1), alignment: .bottom)
-        .controlSize(expanded ? .large : .regular)
-        .animation(.easeInOut(duration: 0.2), value: themeManager.currentTheme.id)
-    }
+        HStack(spacing: 14) {
+            identity
 
-    // MARK: - Layout
-    private var content: some View {
-        Group {
-            if expanded {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 16) {
-                        titleArea
-                        Spacer()
-                        actionButtons
-                        settingsButton
-                        helpButton
-                    }
-                    HStack(spacing: 16) {
-                        Spacer()
-                        moreMenu
-                    }
+            Divider().frame(height: 18)
+
+            transport
+
+            Spacer(minLength: 8)
+
+            if session.currentComponent != nil {
+                Button {
+                    session.unloadCurrentInstrument()
+                } label: {
+                    Text("Unload")
                 }
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 16) {
-                        titleArea
-                        Spacer(minLength: 12)
-                        actionButtons
-                        settingsButton
-                        helpButton
-                        moreMenu
-                    }
-                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
+
+            Button {
+                session.isLibraryVisible.toggle()
+            } label: {
+                Label(
+                    session.isLibraryVisible ? "Hide Library" : "Library",
+                    systemImage: "sidebar.left"
+                )
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help("Show or hide the plugin library")
+
+            Button {
+                session.openSettings()
+            } label: {
+                Label("Settings", systemImage: "gearshape")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help("Audio, MIDI, sample rate (⌘,)")
+
+            moreMenu
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(LauncherChrome.barBackground(theme))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(LauncherChrome.border(theme).opacity(0.55))
+                .frame(height: 1)
         }
     }
 
-    private var titleArea: some View {
+    private var identity: some View {
         HStack(spacing: 8) {
             Text("LAUncher")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(LauncherChrome.textMain(themeManager.currentTheme))
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundStyle(LauncherChrome.textMain(theme))
+
             if let component = session.currentComponent {
-                Text("• \(component.name)")
-                    .foregroundStyle(LauncherChrome.textMuted(themeManager.currentTheme))
+                Text(component.name)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(LauncherChrome.textMuted(theme))
+                    .lineLimit(1)
             } else {
-                Text("• No plugin loaded")
-                    .foregroundStyle(LauncherChrome.textMuted(themeManager.currentTheme))
+                Text("No plugin")
+                    .font(.system(size: 13))
+                    .foregroundStyle(LauncherChrome.textMuted(theme).opacity(0.7))
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
-        .background(LauncherChrome.glassBackground(themeManager.currentTheme, soft: true))
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
-    private var actionButtons: some View {
-        toolbarButton(icon: "plus.square.on.square", label: "Plugin", isActive: session.currentComponent != nil) {
-            session.refreshInstrumentList()
-            session.refreshPluginList()
-            session.isShowingPluginPicker = true
-        }
-    }
+    private var transport: some View {
+        HStack(spacing: 8) {
+            Button {
+                session.toggleTransport()
+            } label: {
+                Image(systemName: session.isTransportPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help(session.isTransportPlaying ? "Pause transport" : "Play transport")
 
-    private var settingsButton: some View {
-        toolbarButton(icon: "gearshape", label: "Settings", isActive: session.isShowingSettings) {
-            session.openSettings()
-        }
-        .help("Audio, MIDI, and appearance (⌘,)")
-    }
+            TextField("BPM", value: $session.bpm, format: .number.precision(.fractionLength(0)))
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 52)
+                .font(.system(size: 12).monospacedDigit())
+                .help("Tempo")
 
-    private var helpButton: some View {
-        toolbarButton(icon: "questionmark.circle", label: "Help") {
-            session.isShowingHelp = true
+            Circle()
+                .fill(engineColor)
+                .frame(width: 7, height: 7)
+                .help(engineHelp)
+
+            Button {
+                session.toggleEngineRunning()
+            } label: {
+                Text(session.engineManager.isRunning ? "Audio On" : "Audio Off")
+            }
+            .buttonStyle(.borderless)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(session.engineManager.isRunning ? .green : LauncherChrome.textMuted(theme))
         }
-        .help("Show help and information")
     }
 
     private var moreMenu: some View {
         Menu {
+            Button("Load Plugin…") {
+                session.refreshPluginList()
+                session.isShowingPluginPicker = true
+            }
             Button {
                 session.rescanPlugins()
             } label: {
-                Label(session.isRescanning ? "Rescanning…" : "Rescan Plugins", systemImage: "arrow.clockwise")
+                Text(session.isRescanning ? "Rescanning…" : "Rescan Plugins")
             }
             .disabled(session.isRescanning)
-            Button("MCP Tools", systemImage: "wand.and.stars") { session.isShowingMCPTools = true }
+
+            Toggle("QWERTY Piano", isOn: $session.isMusicalTypingEnabled)
+            if session.isMusicalTypingEnabled {
+                Toggle("Show QWERTY Piano", isOn: $session.isMusicalTypingVisible)
+            }
+
             if session.currentComponent != nil {
-                Button("Unload Plugin", systemImage: "eject") { session.unloadCurrentInstrument() }
                 Divider()
-                Button("Export Parameters", systemImage: "doc.text") { session.exportParametersAsJSON() }
-                Button("MIDI Learn", systemImage: "keyboard") { session.isShowingMIDIMap = true }
-                Button("AI Chat", systemImage: "message.fill") { session.isShowingChat = true }
+                Button("MIDI Learn…") { session.isShowingMIDIMap = true }
+                Button("Export Parameters…") { session.exportParametersAsJSON() }
                 Divider()
-                Button("Set as Default", systemImage: "star") {
+                Button("Set as Default Plugin") {
                     if let c = session.currentComponent { session.setDefaultPlugin(c) }
                 }
-                Button("Clear Default", systemImage: "star.slash") { session.clearDefaultPlugin() }
+                Button("Clear Default Plugin") { session.clearDefaultPlugin() }
             }
+
             Divider()
-            Button("Settings…", systemImage: "gearshape") {
-                session.openSettings()
-            }
-            .keyboardShortcut(",", modifiers: .command)
-            Button {
-                session.isShowingInspector.toggle()
-            } label: {
-                Label(
-                    session.isShowingInspector ? "Hide Side Panel" : "Show Side Panel",
-                    systemImage: "sidebar.right"
-                )
-            }
-            Divider()
-            Button {
-                session.isMusicalTypingEnabled.toggle()
-            } label: {
-                Label(
-                    session.isMusicalTypingEnabled ? "Disable Musical Typing" : "Enable Musical Typing",
-                    systemImage: "keyboard"
-                )
-            }
-            if session.isMusicalTypingVisible {
-                Button("Hide Musical Typing", systemImage: "eye.slash") { session.isMusicalTypingVisible = false }
-            } else {
-                Button("Show Musical Typing", systemImage: "eye") { session.isMusicalTypingVisible = true }
-            }
+            Button("Help") { session.isShowingHelp = true }
         } label: {
-            toolbarLabel(icon: "ellipsis.circle", label: "More")
+            Image(systemName: "ellipsis.circle")
+                .font(.system(size: 15, weight: .medium))
         }
-        .buttonStyle(LauncherToolbarButtonStyle(theme: themeManager.currentTheme))
+        .menuStyle(.borderlessButton)
+        .frame(width: 28, height: 28)
+        .help("More")
     }
 
-    private func toolbarButton(icon: String, label: String, isActive: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            toolbarLabel(icon: icon, label: label)
+    private var engineColor: Color {
+        switch session.engineState {
+        case .running: return .green
+        case .stopped: return .secondary
+        case .error: return .red
         }
-        .buttonStyle(LauncherToolbarButtonStyle(theme: themeManager.currentTheme, isActive: isActive))
     }
 
-    private func toolbarLabel(icon: String, label: String) -> some View {
-        VStack(spacing: 2) {
-            Image(systemName: icon)
-                .font(.system(size: 13, weight: .semibold))
-            Text(label)
-                .font(.system(size: 10, weight: .semibold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
+    private var engineHelp: String {
+        switch session.engineState {
+        case .running: return "Audio engine running"
+        case .stopped: return "Audio engine stopped"
+        case .error: return "Audio engine error"
         }
     }
 }

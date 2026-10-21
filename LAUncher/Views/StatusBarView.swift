@@ -1,116 +1,101 @@
 import SwiftUI
 
+/// Quiet footer — I/O at a glance; tap opens Settings. Volume lives here.
 struct StatusBarView: View {
     @ObservedObject var session: PluginHostSession
     @ObservedObject var themeManager: ThemeManager
-    @Environment(\.colorScheme) private var colorScheme
-    
+
     init(session: PluginHostSession) {
         self.session = session
         self.themeManager = session.themeManager
     }
 
+    private var theme: AppTheme { themeManager.currentTheme }
+
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 0) {
             Button {
                 session.openSettings(section: .audio)
             } label: {
-                statusLabel(icon: "waveform.path", title: "Sample Rate", value: formattedSampleRate)
+                chip(formattedSampleRate)
             }
             .buttonStyle(.plain)
-            .help("Open Settings to change sample rate")
+            .help("Sample rate — open Settings")
+
+            separator
 
             Button {
                 session.openSettings(section: .audio)
             } label: {
-                statusLabel(icon: "hifispeaker", title: "Output", value: outputDeviceLabel)
+                chip(session.selectedOutputDevice?.displayName ?? "No output")
             }
             .buttonStyle(.plain)
-            .help("Open Settings to choose output device")
+            .help("Output device — open Settings")
+
+            separator
 
             Button {
                 session.openSettings(section: .midi)
             } label: {
-                statusLabel(
-                    icon: "pianokeys",
-                    title: "MIDI",
-                    value: session.selectedMidiSource?.name ?? "All Sources"
-                )
+                chip(session.selectedMidiSource?.name ?? "All MIDI")
             }
             .buttonStyle(.plain)
-            .help("Open Settings to choose MIDI input")
+            .help("MIDI input — open Settings")
 
             if case let .error(message) = session.engineState {
-                Divider().frame(height: 16)
+                separator
                 Label(message, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundColor(.yellow)
-                    .lineLimit(2)
-                    .help(message)
-            } else if let message = session.lastErrorDescription, session.currentComponent == nil {
-                Divider().frame(height: 16)
-                Label(message, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundColor(.yellow)
-                    .lineLimit(2)
+                    .font(.caption)
+                    .foregroundStyle(.yellow)
+                    .lineLimit(1)
                     .help(message)
             }
 
-            Spacer()
+            Spacer(minLength: 12)
 
             HStack(spacing: 8) {
                 Image(systemName: "speaker.wave.2.fill")
-                    .foregroundStyle(.secondary)
-                Slider(value: Binding(get: {
-                    Double(session.masterGain)
-                }, set: { newVal in
-                    session.masterGain = Float(newVal)
-                }), in: 0...1)
-                    .frame(width: 140)
+                    .font(.system(size: 10))
+                    .foregroundStyle(LauncherChrome.textMuted(theme))
+                Slider(
+                    value: Binding(
+                        get: { Double(session.masterGain) },
+                        set: { session.masterGain = Float($0) }
+                    ),
+                    in: 0...1
+                )
+                .frame(width: 110)
+                .controlSize(.mini)
                 Text(masterGainDb)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(LauncherChrome.textMuted(theme))
                     .frame(width: 48, alignment: .trailing)
             }
         }
-        .padding(12)
-        .background(statusBackground)
-        .overlay(
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .background(LauncherChrome.barBackground(theme))
+        .overlay(alignment: .top) {
             Rectangle()
-                .fill(borderColor)
-                .frame(height: 1),
-            alignment: .top
-        )
-        .animation(.easeInOut(duration: 0.2), value: themeManager.currentTheme.id)
-    }
-
-    private var outputDeviceLabel: String {
-        session.selectedOutputDevice?.displayName ?? "None"
-    }
-
-    private func statusLabel(icon: String, title: String, value: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: icon)
-                .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title.uppercased())
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Text(value)
-                    .font(.footnote)
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-            }
+                .fill(LauncherChrome.border(theme).opacity(0.45))
+                .frame(height: 1)
         }
-        .contentShape(Rectangle())
     }
 
-    private var statusBackground: Color {
-        let theme = themeManager.currentTheme
-        return theme.containerBackground.color.opacity(0.75)
+    private func chip(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(LauncherChrome.textMuted(theme))
+            .lineLimit(1)
+            .padding(.vertical, 2)
+            .contentShape(Rectangle())
     }
 
-    private var borderColor: Color {
-        let theme = themeManager.currentTheme
-        return theme.containerBorder.color
+    private var separator: some View {
+        Text("·")
+            .font(.system(size: 11))
+            .foregroundStyle(LauncherChrome.textMuted(theme).opacity(0.45))
+            .padding(.horizontal, 8)
     }
 
     private var formattedSampleRate: String {

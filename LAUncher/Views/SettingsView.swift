@@ -143,7 +143,7 @@ struct SettingsView: View {
             } header: {
                 Text("Controller")
             } footer: {
-                Text("Choose a keyboard or use Musical Typing from the left sidebar (Logic-style A = C).")
+                Text("Choose a MIDI keyboard, or enable QWERTY Piano from More (A = C).")
             }
         }
         .formStyle(.grouped)
