@@ -45,11 +45,23 @@ else
     CODE_SIGN_IDENTITY="${SIGN_ID}" \
     CODE_SIGN_STYLE=Manual \
     DEVELOPMENT_TEAM="${TEAM_ID}" \
+    OTHER_CODE_SIGN_FLAGS="--timestamp" \
     build
   APP="${DERIVED}/Build/Products/Release/LAUncher.app"
 fi
 
 [[ -d "${APP}" ]] || { echo "Missing app: ${APP}" >&2; exit 1; }
+
+# Ensure secure timestamp (required for notarization) even if Xcode omitted it.
+ENTITLEMENTS="${ROOT}/LAUncher/LAUncher.entitlements"
+if [[ -f "${ENTITLEMENTS}" ]]; then
+  codesign --force --deep --options runtime --timestamp \
+    --entitlements "${ENTITLEMENTS}" \
+    --sign "${SIGN_ID}" "${APP}"
+else
+  codesign --force --deep --options runtime --timestamp \
+    --sign "${SIGN_ID}" "${APP}"
+fi
 
 codesign --verify --deep --strict --verbose=2 "${APP}"
 
